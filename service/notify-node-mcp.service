@@ -1,0 +1,16 @@
+[Unit]
+Description=Host-level MCP server for the notification agent (disk, GPU, systemd)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/mnt/data/AI-notification/.venv/bin/python3 -m aiseed_notify serve-node /mnt/data/AI-notification/configs/node-mcp.yaml
+Restart=always
+RestartSec=5
+User=aiseed
+Group=aiseed
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

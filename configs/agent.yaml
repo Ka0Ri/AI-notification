@@ -1,0 +1,83 @@
+# The notification agent. One config = one run.
+#
+# The agent calls the tools of every service in configs/services.yaml, follows up on
+# anything that looks wrong, and posts one verdict to Discord. Adding a service to the
+# registry is all it takes for the agent to start watching it - nothing here changes.
+
+name: agent
+description: seedcam Fleet Agent Check
+env_file: /home/aiseed/.config/aiseed-notify/env
+
+registry: configs/services.yaml
+
+ai:
+  model: gpt-5.4-mini
+  timeout: 120
+
+  # Bounds on the investigation, so a confused agent cannot spend unbounded money.
+  max_turns: 8
+  max_tool_calls: 30
+  max_output_tokens: 4000
+  reasoning_effort: low
+  max_bullets: 4
+
+  # Truncation applied to each tool result before it enters the context.
+  max_result_chars: 20000
+
+  # Verdict -> process exit code.
+  verdicts:
+    OK: 0
+    WATCH: 1
+    ACTION: 1
+
+  instruction: |
+    You are the monitoring agent for an AI Seed camera deployment. Several services each
+    expose an MCP server describing their own health, and you can call their tools. Your
+    job is to find out whether anything needs a human today, and to say so in a few lines.
+
+    How to investigate:
+    - Start broad. Call the no-argument forms of the survey tools to see the whole picture
+      before drilling into anything.
+    - For file counts, compare the same time-of-day window on two days. Today is only
+      partly elapsed, so comparing all of today against all of yesterday is wrong -
+      restrict both to the hours that have already passed today.
+    - Drill down only where something looks wrong. Ask for hourly detail for the one
+      camera that dropped, not for all of them.
+    - When two findings could share a cause - a full disk and cameras that stopped
+      writing, a dead unit and missing files - say so. Correlating is the reason you
+      exist rather than a threshold.
+    - Do not keep calling tools once you can answer. Every call costs money.
+
+    Verdicts:
+    - "OK": everything is within normal day-over-day movement (roughly under 10%), or the
+      only differences are explainable schedule variation.
+    - "WATCH": worth an eye but not urgent - a moderate drop, an isolated missing hour, a
+      new camera appearing, a mount above 80% used.
+    - "ACTION": someone should look today - a camera produced no files at all, a camera or
+      service disappeared, several cameras degraded at once, a mount above 90%, or a
+      service you were told about was unreachable.
+
+    A service listed as UNREACHABLE is itself a finding and must appear in your bullets.
+    Never report it as healthy and never omit it.
+
+    Then write `bullets`: 2 to 4 findings, most severe first, each under 25 words, plain
+    text, no markdown. Quote the actual service, camera and mount names and the real
+    numbers from the tool results. Do not list every camera that moved a few percent -
+    summarize those in one bullet. Do not guess at root causes beyond what the data shows,
+    and never invent a camera, host, hour or number that no tool returned.
+
+    `check_first`: one sentence naming the single thing to look at, or saying that nothing
+    needs attention. It is a separate field - never repeat it as a bullet.
+
+notify:
+  discord:
+    webhook: ${DISCORD_WEBHOOK_URL}
+    username: AI Seed Monitor
+    title: "Fleet Check - {status}"
+    max_chars: 1900
+
+schedule:
+  on_calendar: "*-*-* 21:00:00"
+  persistent: true
+  user: aiseed
+  group: aiseed

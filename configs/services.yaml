@@ -1,0 +1,12 @@
+# The subscription list. A service joins the notification channel by running an MCP
+# server and getting an entry here - nothing more. It never learns about Discord or
+# OpenAI; the agent calls its tools and decides what is worth telling you.
+
+services:
+  node:
+    url: http://127.0.0.1:8932/mcp
+    description: Host health - disk mounts, GPU, systemd units
+
+  seedcam:
+    url: http://127.0.0.1:8931/mcp
+    description: Camera fleet - live session state, recordings, snapshots, scans
