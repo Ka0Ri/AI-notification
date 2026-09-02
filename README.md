@@ -18,7 +18,7 @@ flowchart LR
 
     subgraph S1["MCP SERVER: seedcam.service<br/>127.0.0.1:8931/mcp"]
         T1["camera_status()"]
-        T2["file_counts(date, camera, by_hour)"]
+        T2["compare_days(date, baseline, until_hour)"]
         T3["disk_usage()"]
         T4["streaming_status()"]
     end
@@ -38,7 +38,7 @@ flowchart LR
 
 | | Role | Tools | Lifetime |
 |---|---|---|---|
-| `agent.py` + registry | **MCP client** — the only thing that notifies | none; it calls them | oneshot, fired by the timer |
+| `agent.py` + registry | **MCP client** — picks tools, writes prose, computes nothing | none; it calls them | oneshot, fired by the timer |
 | `seedcam.service` | **MCP server** in a daemon thread beside the camera loop | 4, inside the live process | always on |
 | `notify-node-mcp.service` | **MCP server**, standalone daemon | 2, host-level | always on |
 | Claude Code | **MCP client**, read-only, via `.mcp.json` | none | interactive |

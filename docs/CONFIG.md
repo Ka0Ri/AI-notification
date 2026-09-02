@@ -100,8 +100,11 @@ change, not a code change.
 
 ## Writing tools for a subscribing service
 
-- **Aggregate by default, detail on request.** seedcam's `file_counts` returns per-camera
-  totals and takes `by_hour` for one camera. Aggregated is 3.7 KB; full hourly is 32 KB.
+- **The tool owns every fact.** Counts, sizes, percentages, gap hours and the matched
+  time-of-day window are computed in code. The agent picks tools and writes prose; it
+  never derives, recomputes or estimates a number. seedcam's `compare_days` returns the
+  whole day-over-day diff in one call for exactly this reason — an unaligned window made
+  a normal day read as a 19% collapse.
 - **Return data, not verdicts.** The agent decides severity. A tool that returns
   "everything is fine" removes the agent's ability to disagree.
 - **Never return a secret.** Results reach an external model and can reach Discord.
@@ -109,5 +112,6 @@ change, not a code change.
 - **Make failure a value, not an exception.** Return
   `{"available": false, "error": ...}` rather than raising, so a broken dependency
   becomes a finding instead of ending the investigation.
-- **Take a date rather than assuming today.** The agent compares two days by calling the
-  tool twice, so it needs to choose.
+- **Take a date, and align the window yourself.** Today is only partly elapsed, so a
+  tool comparing two days must cut both at the same hour rather than leaving that to the
+  caller.
