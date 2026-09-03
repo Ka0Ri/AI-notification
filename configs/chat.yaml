@@ -28,6 +28,33 @@ chat:
   deadline: 600
   max_reply_chars: 1900
 
+  # Routine checks, each registered as its own slash command taking no argument. The
+  # prompt IS the question - it goes through the same investigation as a typed /ask, so
+  # a new check is an entry here and nothing in the code. `{yesterday}` in a prompt
+  # becomes a real date when the command runs.
+  commands:
+    - name: data-check
+      description: Local data written today, and which cameras are live now
+      prompt: >
+        Report on the local recording volume today. Call compare_days with no arguments
+        for today's files against yesterday over the matched window, camera_status for
+        which cameras are live, and streaming_status. Name every camera compare_days
+        flagged and every camera that is not live, with its numbers and the window it
+        covers. If nothing is flagged and every camera is live, say so and give the
+        fleet totals and the disk usage.
+
+    - name: nas-check
+      description: The last completed NAS sync, per target and site
+      prompt: >
+        Report the last completed NAS sync. The nightly run at 00:00 uploads the
+        previous day, so call nas_uploads with date {yesterday} - that is the most
+        recent day fully accounted for, and asking for today would report an upload
+        that has not run yet as missing. Give each target's files, megabytes and
+        last_upload time, and name its largest sites. The targets sync different
+        scopes, so never compare one target's numbers with another's. Treat a target
+        listed in `silent` as a finding, and a target with mounted true as an upload
+        that is stuck. Do not call compare_days: this is the NAS, not the local disk.
+
 ai:
   model: gpt-5.4-mini
   timeout: 120

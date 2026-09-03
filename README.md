@@ -77,8 +77,17 @@ ON-demand query
 | Command | Argument | What happens |
 |---------|----------|--------------|
 | `/ask` | `question` (required) | Investigates and replies in the channel. Public - everyone who can see the channel sees the answer. |
+| `/data-check` | none | The same investigation, asking the fixed question in `chat.commands`: today's local files against yesterday, plus which cameras are live. |
+| `/nas-check` | none | The last completed NAS sync, per target and site. The nightly run at 00:00 uploads the previous day, so this asks for yesterday - the most recent day fully accounted for. |
 
-One command, deliberately. The agent decides which tools a question needs, so a second command would only be a worse way of saying the same thing.
+`/ask` is the general form; the rest are routine checks worth a single word. A new one is
+an entry under `chat.commands` in `configs/chat.yaml` - a `name`, a `description` and the
+`prompt` that becomes the question - and nothing in the code. Restart `notify-chat` and
+Discord picks it up.
+
+`{yesterday}` in a prompt becomes a real date each time the command runs, because the
+model has no clock. Dating it at startup instead would go stale: the daemon outlives the
+day it was started on.
 
 ```
 /ask check the NAS data
@@ -115,8 +124,9 @@ sudo systemctl restart notify-chat    # after changing the token or the instruct
 ```
 
 ```
-connected as botman#7395, /ask registered guild 1206993192386568283
+connected as botman#7395, /ask, /data-check, /nas-check registered guild 1206993192386568283
 /ask dangthanhvu.: 'check the NAS data' -> 2 calls, ok
+/data-check dangthanhvu.: 'Report on the local recording volume today...' -> 3 calls, ok
 ```
 
 
