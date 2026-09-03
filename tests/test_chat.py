@@ -35,7 +35,18 @@ def test_a_user_outside_the_allowlist_is_refused():
 def test_an_unreachable_service_stays_visible_in_the_reply():
     t = agent.Transcript(unreachable={"seedcam": "ConnectError: refused"})
     assert "Unreachable: seedcam" in chat.body("/mnt/data is 78% used.", t)
-    assert chat.body("all fine", agent.Transcript()) == "all fine"
+
+
+def test_the_reply_shows_the_tool_chain_in_call_order():
+    t = agent.Transcript(calls=['svc__compare_days({"date":null})', "svc__disk_usage({})"])
+    out = chat.body("all fine", t)
+    assert out.index("1. svc__compare_days") < out.index("2. svc__disk_usage")
+    assert out.startswith("all fine")
+
+
+def test_an_answer_with_no_tools_behind_it_says_so():
+    """An answer built from no tool results is the model talking, not the fleet."""
+    assert "(no tools called)" in chat.body("all fine", agent.Transcript())
 
 
 def test_split_keeps_every_chunk_under_the_limit():

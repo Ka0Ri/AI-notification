@@ -38,10 +38,17 @@ def refusal(cfg: dict, channel_id: int | None, user_id: int) -> str | None:
 
 
 def body(answer: str, transcript: agent.Transcript) -> str:
-    """The answer, plus the one thing a reader cannot see: services that never answered."""
+    """The answer, then what a reader cannot see: what was called, and what never answered.
+
+    The chain is in call order, arguments included, because the same tool called twice
+    with different arguments is two different questions. An answer with no calls behind
+    it is the model talking rather than the tools, which is worth showing.
+    """
+    chain = "\n".join(f"{i}. {call}" for i, call in enumerate(transcript.calls, 1))
+    parts = [answer, f"```\n{chain}\n```" if chain else "(no tools called)"]
     if transcript.unreachable:
-        return f"{answer}\n\nUnreachable: {', '.join(transcript.unreachable)}"
-    return answer
+        parts.append(f"Unreachable: {', '.join(transcript.unreachable)}")
+    return "\n\n".join(parts)
 
 
 def split(text: str, limit: int) -> list[str]:
