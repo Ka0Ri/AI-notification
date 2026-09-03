@@ -9,6 +9,9 @@ Two phases on purpose:
 
 Merging them lets the model emit a verdict mid-investigation; splitting them costs one
 extra call and buys a decision made on complete information.
+
+`run` is the daily check: fixed opening, verdict schema. `ask` is the same investigation
+reached from a chat message: the caller's question opens it, and the answer is prose.
 """
 
 from __future__ import annotations
@@ -30,6 +33,8 @@ DEFAULTS = {
     "max_bullets": 4,
     "max_result_chars": 20000,
 }
+
+OPENING = "Begin the check."
 
 REPORT_PROMPT = (
     "The investigation is finished. Using only what the tool results above actually show, "
@@ -70,7 +75,9 @@ def _context(registry: mcp_client.Registry, services: dict) -> str:
     return "\n".join(lines)
 
 
-async def investigate(cfg: dict, registry: mcp_client.Registry, services: dict) -> tuple[list, Transcript]:
+async def investigate(
+    cfg: dict, registry: mcp_client.Registry, services: dict, question: str | None = None
+) -> tuple[list, Transcript]:
     """Run the bounded tool loop. Returns the conversation and what happened."""
     from openai import OpenAI
 
@@ -80,7 +87,7 @@ async def investigate(cfg: dict, registry: mcp_client.Registry, services: dict) 
     transcript = Transcript(unreachable=dict(registry.unreachable), tools_available=len(tools))
 
     conversation: list = [
-        {"role": "user", "content": f"{_context(registry, services)}\n\nBegin the check."}
+        {"role": "user", "content": f"{_context(registry, services)}\n\n{question or OPENING}"}
     ]
     calls_made = 0
 
@@ -152,8 +159,16 @@ def report(cfg: dict, conversation: list, name: str) -> tuple[dict | None, str |
         return None, f"{type(exc).__name__}: {exc}"[:200]
 
 
-async def run(cfg: dict, services: dict) -> tuple[dict | None, str | None, Transcript]:
-    """Connect, investigate, report. (result, error, transcript)."""
+def final_text(conversation: list) -> str:
+    """The model's last prose message. Empty if it never wrote one."""
+    for item in reversed(conversation):
+        if getattr(item, "type", None) == "message":
+            return "".join(c.text for c in item.content if getattr(c, "text", None)).strip()
+    return ""
+
+
+async def _connect(cfg: dict, services: dict) -> tuple[mcp_client.Registry | None, str | None, Transcript]:
+    """Preflight shared by both entry points. (registry, error, transcript)."""
     if not cfg.get("instruction"):
         return None, "config has no ai.instruction", Transcript()
     if not os.environ.get("OPENAI_API_KEY"):
@@ -167,7 +182,32 @@ async def run(cfg: dict, services: dict) -> tuple[dict | None, str | None, Trans
             f"no tools available - every service unreachable ({detail})",
             Transcript(unreachable=dict(registry.unreachable)),
         )
+    return registry, None, Transcript()
+
+
+async def run(cfg: dict, services: dict) -> tuple[dict | None, str | None, Transcript]:
+    """Connect, investigate, report. (result, error, transcript)."""
+    registry, error, transcript = await _connect(cfg, services)
+    if error:
+        return None, error, transcript
 
     conversation, transcript = await investigate(cfg, registry, services)
     result, error = report(cfg, conversation, cfg.get("name", "agent"))
     return result, error, transcript
+
+
+async def ask(cfg: dict, services: dict, question: str) -> tuple[str | None, str | None, Transcript]:
+    """Answer one question with the same tool loop, in prose. (answer, error, transcript).
+
+    No report phase: a question wants an answer, not a verdict, and the strict schema
+    would flatten it into bullets.
+    """
+    registry, error, transcript = await _connect(cfg, services)
+    if error:
+        return None, error, transcript
+
+    conversation, transcript = await investigate(cfg, registry, services, question)
+    answer = final_text(conversation)
+    if not answer:
+        return None, f"{cfg.get('model', DEFAULTS['model'])} returned no answer", transcript
+    return answer, None, transcript

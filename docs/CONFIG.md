@@ -10,6 +10,9 @@ variable becomes an empty string, so `--no-post` runs work without secrets.
 |----------|--------|
 | `NOTIFY_ENV_FILE` | Env file to load, overriding every config's `env_file`. |
 | `NOTIFY_CONFIG_DIR` | Directory searched when a config is named rather than pathed. |
+| `DISCORD_WEBHOOK_URL` | Where the daily verdict is posted. |
+| `DISCORD_BOT_TOKEN` | The chat bot's token. Receiving needs a bot; the webhook is send-only. |
+| `DISCORD_GUILD_ID` | Server `/ask` is registered in. Unset registers globally, which Discord may take an hour to publish. |
 
 Values already in the real environment win over the env file, so a unit's
 `Environment=` overrides the file.
@@ -84,19 +87,31 @@ the journal (`journalctl -u notify-<name>`).
 | `persistent` | `true` | Run on boot if the last trigger was missed. |
 | `user` / `group` | — | `User=` / `Group=`. **Set these, or the unit runs as root.** |
 
-## `configs/node-mcp.yaml` — the host server
+## `configs/chat.yaml` — the on-demand agent
 
-| Key | Meaning |
-|-----|---------|
-| `host` / `port` | Bind address. Keep it on `127.0.0.1`; there is no auth. |
-| `disk_paths` | Mounts the agent may inspect. Anything else is refused. |
-| `systemd_units` | Units the agent may inspect. Anything else is refused. |
+Same keys as the agent config, minus `notify` and `schedule` (it is a daemon, not a
+timer) and plus `chat`. Its `ai.instruction` is the chat one: prose answers, narrow tool
+use, no verdict. It is a separate file rather than a block in `agent.yaml` because one
+config describes one run.
 
-It serves two tools, `disk_usage` and `systemd_status`, both of which take no arguments
-to return everything allowlisted.
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `chat.token` | — | Use `${DISCORD_BOT_TOKEN}`. |
+| `chat.guild_id` | — | Register `/ask` in one server, where it appears immediately. |
+| `chat.allowed_channels` | `[]` | Channel ids that may ask. Empty allows every channel the command is visible in. |
+| `chat.allowed_users` | `[]` | User ids that may ask. Empty allows everyone. |
+| `chat.deadline` | `600` | Seconds before a question is abandoned. Discord stops accepting the deferred reply at 900. |
+| `chat.max_reply_chars` | `1900` | A longer answer is split across messages. |
 
-Both lists are enforced allowlists, so widening what the agent can see is a config
-change, not a code change.
+Both allowlists are the spend guard for a channel other people can see; `max_turns` and
+`max_tool_calls` bound each individual question. A refusal is ephemeral, so only the
+asker sees it.
+
+`/ask` takes no privileged intent: a slash command carries its own text, so the bot
+never receives a message it was not addressed with.
+
+Run it as a daemon, not a timer — `notify install` refuses a config with no
+`schedule.on_calendar`. Use the committed `service/notify-chat.service`.
 
 ## Writing tools for a subscribing service
 

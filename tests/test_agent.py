@@ -150,3 +150,70 @@ def test_run_reports_when_every_service_is_down(monkeypatch):
     assert result is None
     assert "every service unreachable" in error and "ConnectError: refused" in error
     assert t.unreachable == {"svc": "ConnectError: refused"}
+
+
+def _message(text):
+    return SimpleNamespace(type="message", content=[SimpleNamespace(text=text)])
+
+
+def test_the_question_opens_the_investigation(cfg, monkeypatch):
+    """A chat question replaces the daily opening, or the model answers the wrong thing."""
+    fake = _FakeOpenAI([[]])
+    monkeypatch.setattr("openai.OpenAI", fake)
+    asyncio.run(agent.investigate(cfg, _Registry([_tool("probe")]), {"svc": {}}, "is the NAS ok?"))
+    assert fake.last_kwargs["input"][0]["content"].endswith("is the NAS ok?")
+
+
+def test_investigate_without_a_question_keeps_the_daily_opening(cfg, monkeypatch):
+    fake = _FakeOpenAI([[]])
+    monkeypatch.setattr("openai.OpenAI", fake)
+    asyncio.run(agent.investigate(cfg, _Registry([_tool("probe")]), {"svc": {}}))
+    assert fake.last_kwargs["input"][0]["content"].endswith(agent.OPENING)
+
+
+def test_final_text_takes_the_last_prose_message():
+    conversation = [
+        {"role": "user", "content": "q"},
+        _message("first"),
+        _fn_call("svc__probe", "c1"),
+        _message("final"),
+    ]
+    assert agent.final_text(conversation) == "final"
+    assert agent.final_text([{"role": "user", "content": "q"}]) == ""
+
+
+def _live_registry(monkeypatch, reg):
+    async def discover(services, timeout=15.0):
+        return reg
+
+    monkeypatch.setattr(mcp_client, "discover", discover)
+
+
+def test_ask_returns_prose_and_never_a_verdict(cfg, monkeypatch):
+    """The report phase must not run: a question wants an answer, not bullets."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    fake = _FakeOpenAI([[_fn_call("svc__probe", "c1")], [_message("/mnt/data is 78% used.")]])
+    monkeypatch.setattr("openai.OpenAI", fake)
+    reg = _Registry([_tool("probe")])
+    _live_registry(monkeypatch, reg)
+
+    answer, error, t = asyncio.run(agent.ask(cfg, {"svc": {}}, "how full is the disk?"))
+    assert (answer, error) == ("/mnt/data is 78% used.", None)
+    assert reg.seen == [("svc__probe", {})]
+    assert fake.calls == 2  # investigate turns only
+    assert t.calls == ["svc__probe({})"]
+
+
+def test_ask_reports_when_the_model_writes_nothing(cfg, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr("openai.OpenAI", _FakeOpenAI([[]]))
+    _live_registry(monkeypatch, _Registry([_tool("probe")]))
+    answer, error, _ = asyncio.run(agent.ask(cfg, {"svc": {}}, "anything?"))
+    assert answer is None and "no answer" in error
+
+
+def test_ask_refuses_when_every_service_is_down(cfg, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    _live_registry(monkeypatch, mcp_client.Registry(unreachable={"svc": "ConnectError: refused"}))
+    answer, error, _ = asyncio.run(agent.ask(cfg, {"svc": {}}, "anything?"))
+    assert answer is None and "every service unreachable" in error

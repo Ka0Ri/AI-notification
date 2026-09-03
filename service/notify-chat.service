@@ -1,0 +1,18 @@
+[Unit]
+Description=Discord chat agent for the notification hub (/ask)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/home/aiseed/.config/aiseed-notify/env
+ExecStart=/mnt/data/AI-notification/.venv/bin/python3 -m aiseed_notify chat /mnt/data/AI-notification/configs/chat.yaml
+Restart=always
+RestartSec=10
+User=aiseed
+Group=aiseed
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

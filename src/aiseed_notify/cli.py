@@ -80,10 +80,14 @@ def cmd_services(args) -> int:
     return 1 if down else 0
 
 
-def cmd_serve_node(args) -> int:
-    from .mcp.node_server import serve
+def cmd_chat(args) -> int:
+    """Stay connected to Discord and answer /ask with an investigation each time."""
+    from . import chat
 
-    serve(args.config)
+    cfg = load(args.config)
+    services = mcp_client.load_registry(_registry_path(cfg))
+    print(f"{cfg['description']}   ({len(services)} services subscribed)")
+    chat.serve(cfg, services)
     return 0
 
 
@@ -125,9 +129,9 @@ def main() -> int:
     svc.add_argument("--timeout", type=float, default=10.0, help="per-service connect timeout")
     svc.set_defaults(func=cmd_services)
 
-    node = sub.add_parser("serve-node", help="run the host-level MCP server (disk, GPU, systemd)")
-    node.add_argument("config", nargs="?", default="configs/node-mcp.yaml", help="node server config")
-    node.set_defaults(func=cmd_serve_node)
+    ch = sub.add_parser("chat", help="answer /ask in Discord by investigating on demand")
+    ch.add_argument("config", nargs="?", default="configs/chat.yaml", help="chat config (default: configs/chat.yaml)")
+    ch.set_defaults(func=cmd_chat)
 
     install = sub.add_parser("install", help="generate the systemd .service/.timer pair")
     install.add_argument("config", help="config path, or a name under $NOTIFY_CONFIG_DIR")
