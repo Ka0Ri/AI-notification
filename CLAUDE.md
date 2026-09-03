@@ -108,21 +108,15 @@ Tier 2 — `docs/<RUN_NAME>.md`, one file per run, linked from the row's `Detail
 
 ## 7. Config Files
 
-**One run = one config file. The config is the run's definition, not a convenience.**
+**Configs exist so nothing is hardcoded**
 
-- Location `configs/<run-name>.yaml`. One file per run, committed with the run.
-- The config holds every setting and hyperparameter that shapes the result: model, backend,
-  dataset/split, sampling params, batch/precision, seed, output dir.
-- Code reads its parameters from the config. No hardcoded values in scripts, no settings that
-  live only in a shell command or in someone's head.
-- CLI flags may override a config for a one-off, but anything logged in the tracker must come
-  from a committed config.
-- Never edit a config that a past run used — copy it to a new name. Old configs stay
-  reproducible.
+- Location `configs/*.yaml`. Edit them freely; a config is a working file, not a record.
+- A setting that shapes the result belongs in the config, not in a script, a shell command,
+  or someone's head: model, prompts, limits, paths, seeds.
+- Code reads its parameters from the config, without defaults — a default in code is a
+  hardcoded value that happens to be optional.
+- CLI flags may override a config for a one-off.
 - No secrets, no absolute paths tied to one machine.
-- The tracker row and report header name the config file used.
 
-The test: a maintainer opens `configs/<run-name>.yaml` and knows exactly how that run was
-executed, without reading the code.
 
 ---

@@ -1,18 +1,6 @@
 """The hub side: connect to every subscribed service and expose their tools as one set.
 
-A service subscribes by running an MCP server and getting an entry in the registry
-(`configs/services.yaml`). It never learns about Discord, OpenAI or notification policy.
-
-Tool names are namespaced `<service>__<tool>` so two services can each have a
-`disk_usage` without colliding.
-
-**One session per operation, deliberately.** The MCP transport runs an anyio task group,
-and a task group must be exited by the task that entered it. Holding sessions open in an
-AsyncExitStack across a loop violates that ("Attempted to exit cancel scope in a
-different task") and lets one dead service poison every other connection at teardown.
-Opening a fresh session inside a single `async with` keeps enter and exit in the same
-task. Over loopback that costs a few milliseconds per call, and these servers are
-stateless health probes, so there is no session state to preserve.
+A service subscribes by running an MCP server and getting an entry in the registry (`configs/services.yaml`).
 """
 
 from __future__ import annotations

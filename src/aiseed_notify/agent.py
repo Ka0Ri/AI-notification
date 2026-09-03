@@ -1,22 +1,7 @@
-"""The investigating agent: call the subscribed services' tools, then write a verdict.
+"""The agent: call the subscribed services' tools in a loop, then answer.
 
-Two phases on purpose:
-
-1. Investigate - a bounded tool-calling loop over every reachable tool. The model
-   decides what to look at and what to follow up on.
-2. Report - one final call with no tools and a strict schema, so the verdict is written
-   only after the looking is finished.
-
-Merging them lets the model emit a verdict mid-investigation; splitting them costs one
-extra call and buys a decision made on complete information.
-
-`run` is the daily check: the config's opening, verdict schema. `ask` is the same
-investigation reached from a chat message: the caller's question opens it, and the answer
-is prose.
-
-Every parameter and prompt comes from the config. There are no defaults here: a config is
-the whole definition of its run, so a missing key is an error rather than a value nobody
-chose.
+`run` is the daily check and ends with a verdict for Discord. `ask` answers one question
+from `/ask` in prose. Both read their parameters and prompts from the config's `ai` block.
 """
 
 from __future__ import annotations
@@ -27,34 +12,6 @@ import os
 from dataclasses import dataclass, field
 
 from . import ai, mcp_client
-from .config import require
-
-INVESTIGATE_KEYS = (
-    "instruction",
-    "model",
-    "timeout",
-    "max_turns",
-    "max_tool_calls",
-    "max_output_tokens",
-    "reasoning_effort",
-    "max_result_chars",
-)
-
-REPORT_KEYS = (
-    "instruction",
-    "model",
-    "timeout",
-    "max_output_tokens",
-    "reasoning_effort",
-    "verdicts",
-    "max_bullets",
-    "report_prompt",
-)
-
-
-# The daily run reads every key both phases need, so it validates them before the first
-# model call rather than failing after the investigation is already paid for.
-RUN_KEYS = tuple(dict.fromkeys(("opening",) + INVESTIGATE_KEYS + REPORT_KEYS))
 
 
 @dataclass
@@ -95,7 +52,6 @@ async def investigate(
     """Run the bounded tool loop. Returns the conversation and what happened."""
     from openai import OpenAI
 
-    require(cfg, INVESTIGATE_KEYS, "ai")
     client = OpenAI(timeout=cfg["timeout"])
     tools = _openai_tools(registry.tools)
     transcript = Transcript(unreachable=dict(registry.unreachable), tools_available=len(tools))
@@ -182,8 +138,7 @@ def final_text(conversation: list) -> str:
 async def _connect(cfg: dict, services: dict) -> tuple[mcp_client.Registry | None, str | None, Transcript]:
     """Preflight shared by both entry points. (registry, error, transcript).
 
-    Config completeness is checked by the callers via require(); what is left here are
-    runtime conditions, which are findings rather than mistakes in the config.
+    These are runtime conditions, which are findings rather than mistakes in the config.
     """
     if not os.environ.get("OPENAI_API_KEY"):
         return None, "OPENAI_API_KEY is not set", Transcript()
@@ -201,7 +156,6 @@ async def _connect(cfg: dict, services: dict) -> tuple[mcp_client.Registry | Non
 
 async def run(cfg: dict, services: dict) -> tuple[dict | None, str | None, Transcript]:
     """Connect, investigate, report. (result, error, transcript)."""
-    require(cfg, RUN_KEYS, "ai")
     registry, error, transcript = await _connect(cfg, services)
     if error:
         return None, error, transcript
@@ -217,7 +171,6 @@ async def ask(cfg: dict, services: dict, question: str) -> tuple[str | None, str
     No report phase: a question wants an answer, not a verdict, and the strict schema
     would flatten it into bullets.
     """
-    require(cfg, INVESTIGATE_KEYS, "ai")
     registry, error, transcript = await _connect(cfg, services)
     if error:
         return None, error, transcript

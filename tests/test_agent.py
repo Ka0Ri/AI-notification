@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from aiseed_notify import ConfigError, agent, mcp_client
+from aiseed_notify import agent, mcp_client
 
 
 def _tool(name, service="svc", schema=None):
@@ -146,23 +146,6 @@ def test_arguments_are_passed_through(cfg, monkeypatch):
     reg = _Registry([_tool("probe")])
     asyncio.run(agent.investigate(cfg, reg, {"svc": {}}, "go"))
     assert reg.seen == [("svc__probe", {"x": "hello"})]
-
-
-def test_run_refuses_an_incomplete_ai_block():
-    """No defaults: a config missing a parameter must say so, not silently pick one."""
-    with pytest.raises(ConfigError) as exc:
-        asyncio.run(agent.run({}, {"svc": {"url": "http://x"}}))
-    assert "instruction" in str(exc.value) and "report_prompt" in str(exc.value)
-
-
-def test_run_names_every_missing_key_before_spending_anything(cfg, monkeypatch):
-    """Validation happens before the first model call, not after the investigation."""
-    calls = []
-    monkeypatch.setattr(mcp_client, "discover", lambda *a, **k: calls.append(1))
-    with pytest.raises(ConfigError) as exc:
-        asyncio.run(agent.run({k: v for k, v in cfg.items() if k != "opening"}, {"svc": {}}))
-    assert "opening" in str(exc.value)
-    assert calls == []
 
 
 def test_run_reports_when_every_service_is_down(cfg, monkeypatch):

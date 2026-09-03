@@ -1,12 +1,5 @@
 """Discord slash command: `/ask` puts a question through the same investigation.
 
-The daily agent runs on a timer and cannot be asked anything - it posts once and exits.
-This is the other direction: a question typed in Discord opens the same tool loop, so
-"is the NAS backup healthy?" is answered by calling the services' tools now.
-
-A bot token, not a webhook: receiving needs a gateway connection. Slash commands carry
-their own text, so no privileged intent is needed and the bot never sees a message it
-was not addressed with.
 """
 
 from __future__ import annotations
