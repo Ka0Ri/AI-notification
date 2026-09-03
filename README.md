@@ -70,10 +70,7 @@ uv run notify install configs/agent.yaml          # regenerate the systemd timer
 
 ## The Discord bot
 
-The timer answers one question a day, the one written into `configs/agent.yaml`.
-`notify-chat.service` answers the ones you type. It holds a gateway connection, and every
-`/ask` runs the same investigation - the same MCP tools, the same rule that tools own the
-facts - scoped to what you asked, and replies in the channel.
+ON-demand query
 
 ### Commands
 
@@ -81,8 +78,7 @@ facts - scoped to what you asked, and replies in the channel.
 |---------|----------|--------------|
 | `/ask` | `question` (required) | Investigates and replies in the channel. Public - everyone who can see the channel sees the answer. |
 
-One command, deliberately. The agent decides which tools a question needs, so a second
-command would only be a worse way of saying the same thing.
+One command, deliberately. The agent decides which tools a question needs, so a second command would only be a worse way of saying the same thing.
 
 ```
 /ask check the NAS data
@@ -90,20 +86,6 @@ command would only be a worse way of saying the same thing.
 /ask is any camera offline right now?
 /ask which cameras dropped compared to yesterday?
 ```
-
-The reply is prose, not a verdict: no OK/WATCH/ACTION label, no bullets. It quotes the
-site and camera names and the exact numbers the tools returned, including the window they
-cover, and says a number is unavailable rather than deriving one. If a subscribed service
-did not answer, the reply says so instead of quietly leaving it out.
-
-Discord is told to wait as soon as the command arrives, because an investigation takes
-longer than the three seconds it allows; the answer replaces the "thinking" state a few
-seconds later. Over `max_reply_chars` it is split across messages.
-
-**Each question is independent.** Nothing is remembered between them, so a follow-up like
-"and yesterday?" needs restating in full. That is a deliberate limit, not a gap - health
-lookups are one-shot, and a per-channel history would grow context and cost with nothing
-to show for it.
 
 ### Setup
 
@@ -125,16 +107,6 @@ sudo cp service/notify-chat.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now notify-chat
 ```
 
-### Who may ask
-
-`chat.allowed_channels` and `chat.allowed_users` in [configs/chat.yaml](configs/chat.yaml)
-are the spend guard: every question costs OpenAI credit, so fill at least one of them if
-the server has members who should not be able to start an investigation. Empty means
-anyone who can see the command. A refusal is ephemeral - only the asker sees it.
-
-Per question, `max_turns` and `max_tool_calls` bound the loop and `chat.deadline` abandons
-one that will not finish. They are spend guards, not tuning knobs.
-
 ### Running it
 
 ```bash
@@ -147,7 +119,4 @@ connected as botman#7395, /ask registered guild 1206993192386568283
 /ask dangthanhvu.: 'check the NAS data' -> 2 calls, ok
 ```
 
-The question, who asked, how many tools it took and whether it worked - the answer itself
-stays in Discord. To rotate the token, replace the line in the env file and restart:
-`/ask` is registered against the application, not the token, so it stays in the command
-list and needs no re-registration.
+
