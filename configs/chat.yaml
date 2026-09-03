@@ -38,6 +38,9 @@ ai:
   max_output_tokens: 4000
   reasoning_effort: low
 
+  # Truncation applied to each tool result before it enters the context.
+  max_result_chars: 20000
+
   instruction: |
     You are the monitoring agent for an AI Seed camera deployment, answering a question
     an operator just typed in Discord. Several services each expose an MCP server

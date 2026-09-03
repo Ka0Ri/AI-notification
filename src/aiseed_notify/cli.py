@@ -38,7 +38,9 @@ def cmd_agent(args) -> int:
             print(f"    -> {call}")
 
     # MCP-only, by design: there is no rule-based fallback. If the agent could not
-    # reach a verdict, nothing is posted and the unit fails loudly instead.
+    # reach a verdict, nothing is posted and the unit fails loudly instead. The verdict
+    # itself never sets the exit code: a WATCH is a successful run, and systemd's unit
+    # state must keep meaning "the monitor worked".
     if not result:
         print(f"\nAGENT FAILED: {error}", file=sys.stderr)
         return 2
@@ -47,17 +49,17 @@ def cmd_agent(args) -> int:
     summary = summary_text(result)
     print(f"\nVERDICT: {status}\n{summary}")
     if args.no_post:
-        return (cfg["ai"].get("verdicts") or agent.DEFAULT_VERDICTS).get(status, 1)
+        return 0
 
     dcfg = cfg["notify"].get("discord")
     if not dcfg:
         raise ValueError("config has no notify.discord block")
-    title = dcfg.get("title", "{name} - {status}").format(name=cfg["name"], status=status, subject="")
+    title = dcfg.get("title", "{name} - {status}").format(name=cfg["name"], status=status)
     footer = f"{transcript.tools_available} tools across {len(services)} services, {len(transcript.calls)} calls"
     if transcript.unreachable:
         footer += f" | unreachable: {', '.join(transcript.unreachable)}"
-    discord.post(dcfg, title.rstrip(" -"), summary, footer)
-    return (cfg["ai"].get("verdicts") or agent.DEFAULT_VERDICTS).get(status, 1)
+    discord.post(dcfg, title, summary, footer)
+    return 0
 
 
 def cmd_services(args) -> int:

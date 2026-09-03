@@ -17,13 +17,10 @@ import discord
 from discord import app_commands
 
 from . import agent
+from .config import require
 from .errors import ConfigError
 
-DEFAULTS = {
-    # Discord accepts a deferred reply for 15 minutes; this also caps spend per question.
-    "deadline": 600,
-    "max_reply_chars": 1900,
-}
+CHAT_KEYS = ("deadline", "max_reply_chars")
 
 
 def refusal(cfg: dict, channel_id: int | None, user_id: int) -> str | None:
@@ -89,7 +86,8 @@ class Bot(discord.Client):
 
 def build(cfg: dict, services: dict) -> Bot:
     """Wire `/ask` to the agent. Split from serve() so it can be built without a token."""
-    chat = {**DEFAULTS, **(cfg.get("chat") or {})}
+    chat = cfg.get("chat") or {}
+    require(chat, CHAT_KEYS, "chat")
     ai_cfg = {**cfg["ai"], "name": cfg["name"]}
     guild = discord.Object(id=int(chat["guild_id"])) if chat.get("guild_id") else None
     client = Bot(guild)

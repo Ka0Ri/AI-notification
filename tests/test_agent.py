@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from aiseed_notify import agent, mcp_client
+from aiseed_notify import ConfigError, agent, mcp_client
 
 
 def _tool(name, service="svc", schema=None):
@@ -60,7 +60,22 @@ class _FakeOpenAI:
 
 @pytest.fixture
 def cfg():
-    return {"instruction": "watch things", "model": "test-model", "verdicts": {"OK": 0, "ACTION": 1}}
+    """A complete `ai` block: the agent has no defaults, so a test must supply the lot."""
+    return {
+        "instruction": "watch things",
+        "model": "test-model",
+        "timeout": 30,
+        "max_turns": 8,
+        "max_tool_calls": 30,
+        "max_output_tokens": 4000,
+        "reasoning_effort": "low",
+        "max_result_chars": 20000,
+        "max_bullets": 4,
+        "verdicts": ["OK", "ACTION"],
+        "opening": "Begin the check.",
+        "report_prompt": "write the report",
+        "name": "test",
+    }
 
 
 def test_tool_conversion_preserves_schema():
@@ -82,7 +97,7 @@ def test_loop_stops_when_the_model_stops_calling_tools(cfg, monkeypatch):
     fake = _FakeOpenAI([[_fn_call("svc__probe", "c1")], []])
     monkeypatch.setattr("openai.OpenAI", fake)
     reg = _Registry([_tool("probe")])
-    _, t = asyncio.run(agent.investigate(cfg, reg, {"svc": {}}))
+    _, t = asyncio.run(agent.investigate(cfg, reg, {"svc": {}}, "go"))
     assert t.turns == 2
     assert reg.seen == [("svc__probe", {})]
 
@@ -92,7 +107,7 @@ def test_max_turns_is_enforced(cfg, monkeypatch):
     fake = _FakeOpenAI([[_fn_call("svc__probe", f"c{i}")] for i in range(20)])
     monkeypatch.setattr("openai.OpenAI", fake)
     reg = _Registry([_tool("probe")])
-    _, t = asyncio.run(agent.investigate({**cfg, "max_turns": 3}, reg, {"svc": {}}))
+    _, t = asyncio.run(agent.investigate({**cfg, "max_turns": 3}, reg, {"svc": {}}, "go"))
     assert t.turns == 3
     assert len(reg.seen) == 3
 
@@ -103,7 +118,7 @@ def test_max_tool_calls_is_enforced(cfg, monkeypatch):
     fake = _FakeOpenAI([burst, []])
     monkeypatch.setattr("openai.OpenAI", fake)
     reg = _Registry([_tool("probe")])
-    conversation, _ = asyncio.run(agent.investigate({**cfg, "max_tool_calls": 2}, reg, {"svc": {}}))
+    conversation, _ = asyncio.run(agent.investigate({**cfg, "max_tool_calls": 2}, reg, {"svc": {}}, "go"))
     assert len(reg.seen) == 2
     exhausted = [c for c in conversation if isinstance(c, dict) and "budget exhausted" in str(c.get("output", ""))]
     assert len(exhausted) == 3
@@ -119,7 +134,7 @@ def test_tool_results_are_truncated(cfg, monkeypatch):
     fake = _FakeOpenAI([[_fn_call("svc__probe", "c1")], []])
     monkeypatch.setattr("openai.OpenAI", fake)
     conversation, _ = asyncio.run(
-        agent.investigate({**cfg, "max_result_chars": 100}, Fat([_tool("probe")]), {"svc": {}})
+        agent.investigate({**cfg, "max_result_chars": 100}, Fat([_tool("probe")]), {"svc": {}}, "go")
     )
     outputs = [c["output"] for c in conversation if isinstance(c, dict) and c.get("type") == "function_call_output"]
     assert outputs == ["x" * 100]
@@ -129,16 +144,28 @@ def test_arguments_are_passed_through(cfg, monkeypatch):
     fake = _FakeOpenAI([[_fn_call("svc__probe", "c1", '{"x": "hello"}')], []])
     monkeypatch.setattr("openai.OpenAI", fake)
     reg = _Registry([_tool("probe")])
-    asyncio.run(agent.investigate(cfg, reg, {"svc": {}}))
+    asyncio.run(agent.investigate(cfg, reg, {"svc": {}}, "go"))
     assert reg.seen == [("svc__probe", {"x": "hello"})]
 
 
-def test_run_refuses_without_an_instruction():
-    result, error, _ = asyncio.run(agent.run({}, {"svc": {"url": "http://x"}}))
-    assert result is None and "instruction" in error
+def test_run_refuses_an_incomplete_ai_block():
+    """No defaults: a config missing a parameter must say so, not silently pick one."""
+    with pytest.raises(ConfigError) as exc:
+        asyncio.run(agent.run({}, {"svc": {"url": "http://x"}}))
+    assert "instruction" in str(exc.value) and "report_prompt" in str(exc.value)
 
 
-def test_run_reports_when_every_service_is_down(monkeypatch):
+def test_run_names_every_missing_key_before_spending_anything(cfg, monkeypatch):
+    """Validation happens before the first model call, not after the investigation."""
+    calls = []
+    monkeypatch.setattr(mcp_client, "discover", lambda *a, **k: calls.append(1))
+    with pytest.raises(ConfigError) as exc:
+        asyncio.run(agent.run({k: v for k, v in cfg.items() if k != "opening"}, {"svc": {}}))
+    assert "opening" in str(exc.value)
+    assert calls == []
+
+
+def test_run_reports_when_every_service_is_down(cfg, monkeypatch):
     """MCP-only means no fallback, so this path must at least name what failed."""
     monkeypatch.setenv("OPENAI_API_KEY", "test")
 
@@ -146,7 +173,7 @@ def test_run_reports_when_every_service_is_down(monkeypatch):
         return mcp_client.Registry(unreachable={"svc": "ConnectError: refused"})
 
     monkeypatch.setattr(mcp_client, "discover", all_dead)
-    result, error, t = asyncio.run(agent.run({"instruction": "x"}, {"svc": {"url": "http://x"}}))
+    result, error, t = asyncio.run(agent.run(cfg, {"svc": {"url": "http://x"}}))
     assert result is None
     assert "every service unreachable" in error and "ConnectError: refused" in error
     assert t.unreachable == {"svc": "ConnectError: refused"}
@@ -164,11 +191,13 @@ def test_the_question_opens_the_investigation(cfg, monkeypatch):
     assert fake.last_kwargs["input"][0]["content"].endswith("is the NAS ok?")
 
 
-def test_investigate_without_a_question_keeps_the_daily_opening(cfg, monkeypatch):
-    fake = _FakeOpenAI([[]])
+def test_the_daily_run_opens_with_the_configured_opening(cfg, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    fake = _FakeOpenAI([[], []])
     monkeypatch.setattr("openai.OpenAI", fake)
-    asyncio.run(agent.investigate(cfg, _Registry([_tool("probe")]), {"svc": {}}))
-    assert fake.last_kwargs["input"][0]["content"].endswith(agent.OPENING)
+    _live_registry(monkeypatch, _Registry([_tool("probe")]))
+    asyncio.run(agent.run({**cfg, "opening": "Begin the check."}, {"svc": {}}))
+    assert fake.last_kwargs["input"][0]["content"].endswith("Begin the check.")
 
 
 def test_final_text_takes_the_last_prose_message():

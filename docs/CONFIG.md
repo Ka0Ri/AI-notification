@@ -47,21 +47,35 @@ never silently omitted, and never fatal to the run.
 
 ### `ai`
 
-| Key | Default | Meaning |
+**Every key is required — there are no defaults in the code.** A config is the whole
+definition of its run, so a missing key raises `ConfigError` naming it, before the first
+model call is paid for. The chat config needs only the keys the ask path reads: no
+`verdicts`, `max_bullets`, `opening` or `report_prompt`.
+
+| Key | Meaning | Read by |
 |-----|---------|---------|
-| `instruction` | — | How to investigate and what each verdict means. Required. |
-| `model` | `gpt-5.4-mini` | OpenAI model id. |
-| `verdicts` | `{OK: 0, WATCH: 1, ACTION: 1}` | Allowed verdicts, mapped to exit codes. |
-| `max_turns` | `8` | Model round trips in the investigation. |
-| `max_tool_calls` | `30` | Total tool calls across the run. |
-| `max_result_chars` | `20000` | Truncation per tool result before it enters context. |
-| `max_output_tokens` | `4000` | |
-| `reasoning_effort` | `low` | |
-| `max_bullets` | `4` | Bullets kept from the report. |
-| `timeout` | `120` | Seconds per model call. |
+| `instruction` | How to investigate and what each verdict means. | both |
+| `model` | OpenAI model id. | both |
+| `timeout` | Seconds per model call. | both |
+| `max_turns` | Model round trips in the investigation. | both |
+| `max_tool_calls` | Total tool calls across the run. | both |
+| `max_output_tokens` | | both |
+| `reasoning_effort` | | both |
+| `max_result_chars` | Truncation per tool result before it enters context. | both |
+| `opening` | The message that opens the daily investigation. | `agent` |
+| `report_prompt` | Closes the investigation and opens the report phase. | `agent` |
+| `verdicts` | List of verdicts the model may return. | `agent` |
+| `max_bullets` | Bullets kept from the report. | `agent` |
+
+`verdicts` is the report schema's `enum`, so `instruction` must define every name listed.
+It is a list, not a mapping: the verdict is the report's content and never the run's exit
+code (see below).
 
 `max_turns` and `max_tool_calls` are spend guards, not tuning knobs: a confused agent
 would otherwise loop. Both are enforced and tested.
+
+Both prompts live here rather than in `agent.py` for the same reason as the numbers — a
+run that cannot be reproduced from its config file is not defined by it.
 
 The run is two model calls minimum. The **investigate** phase has tools and no schema;
 the **report** phase has the strict schema and no tools, so the verdict is written only
@@ -78,6 +92,20 @@ after the looking is done.
 
 Only the verdict, bullets and one footer line are posted. The tool transcript stays in
 the journal (`journalctl -u notify-<name>`).
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | The agent reached a verdict and delivered it. Any verdict, including `ACTION`. |
+| `2` | The run failed: no verdict, an incomplete config, or Discord refused the post. |
+
+The verdict does not affect the exit code. Fleet health is what Discord reports; the
+unit's state answers a different question — whether the monitor itself worked. Mapping
+`WATCH`/`ACTION` to a non-zero exit made systemd log a successful run as
+`Failed to start notify-agent.service`, which hid the case that matters: the agent dying
+without posting anything. To alert on unit failure, use `OnFailure=` on the unit — not
+the reporting run's exit status.
 
 ### `schedule`
 
@@ -100,8 +128,8 @@ config describes one run.
 | `chat.guild_id` | — | Register `/ask` in one server, where it appears immediately. |
 | `chat.allowed_channels` | `[]` | Channel ids that may ask. Empty allows every channel the command is visible in. |
 | `chat.allowed_users` | `[]` | User ids that may ask. Empty allows everyone. |
-| `chat.deadline` | `600` | Seconds before a question is abandoned. Discord stops accepting the deferred reply at 900. |
-| `chat.max_reply_chars` | `1900` | A longer answer is split across messages. |
+| `chat.deadline` | required | Seconds before a question is abandoned. Discord stops accepting the deferred reply at 900. |
+| `chat.max_reply_chars` | required | A longer answer is split across messages. |
 
 Both allowlists are the spend guard for a channel other people can see; `max_turns` and
 `max_tool_calls` bound each individual question. A refusal is ephemeral, so only the

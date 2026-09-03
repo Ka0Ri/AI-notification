@@ -24,11 +24,19 @@ ai:
   # Truncation applied to each tool result before it enters the context.
   max_result_chars: 20000
 
-  # Verdict -> process exit code.
-  verdicts:
-    OK: 0
-    WATCH: 1
-    ACTION: 1
+  # Verdicts the model may return. This is the schema's enum, so the instruction below
+  # must define every name listed here. The verdict is the report's content and never
+  # the run's exit code.
+  verdicts: [OK, WATCH, ACTION]
+
+  # The message that opens the daily investigation.
+  opening: Begin the check.
+
+  # Closes the investigation and opens the report phase, which runs with no tools.
+  report_prompt: >
+    The investigation is finished. Using only what the tool results above actually show,
+    write the report now. Quote real names and numbers from the results. Never invent a
+    service, host, camera or number that did not appear.
 
   instruction: |
     You are the monitoring agent for an AI Seed camera deployment. Several services each

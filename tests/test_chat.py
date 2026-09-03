@@ -13,7 +13,11 @@ from aiseed_notify import agent, chat
 
 @pytest.fixture
 def cfg():
-    return {"name": "chat", "ai": {"instruction": "answer things"}, "chat": {"guild_id": 42}}
+    return {
+        "name": "chat",
+        "ai": {"instruction": "answer things"},
+        "chat": {"guild_id": 42, "deadline": 600, "max_reply_chars": 1900},
+    }
 
 
 def test_empty_allowlists_restrict_nothing():

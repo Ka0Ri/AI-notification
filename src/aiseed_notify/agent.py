@@ -10,8 +10,13 @@ Two phases on purpose:
 Merging them lets the model emit a verdict mid-investigation; splitting them costs one
 extra call and buys a decision made on complete information.
 
-`run` is the daily check: fixed opening, verdict schema. `ask` is the same investigation
-reached from a chat message: the caller's question opens it, and the answer is prose.
+`run` is the daily check: the config's opening, verdict schema. `ask` is the same
+investigation reached from a chat message: the caller's question opens it, and the answer
+is prose.
+
+Every parameter and prompt comes from the config. There are no defaults here: a config is
+the whole definition of its run, so a missing key is an error rather than a value nobody
+chose.
 """
 
 from __future__ import annotations
@@ -22,25 +27,34 @@ import os
 from dataclasses import dataclass, field
 
 from . import ai, mcp_client
+from .config import require
 
-DEFAULTS = {
-    "model": "gpt-5.4-mini",
-    "timeout": 120,
-    "max_turns": 8,
-    "max_tool_calls": 30,
-    "max_output_tokens": 4000,
-    "reasoning_effort": "low",
-    "max_bullets": 4,
-    "max_result_chars": 20000,
-}
-
-OPENING = "Begin the check."
-
-REPORT_PROMPT = (
-    "The investigation is finished. Using only what the tool results above actually show, "
-    "write the report now. Quote real names and numbers from the results. Never invent a "
-    "service, host, camera or number that did not appear."
+INVESTIGATE_KEYS = (
+    "instruction",
+    "model",
+    "timeout",
+    "max_turns",
+    "max_tool_calls",
+    "max_output_tokens",
+    "reasoning_effort",
+    "max_result_chars",
 )
+
+REPORT_KEYS = (
+    "instruction",
+    "model",
+    "timeout",
+    "max_output_tokens",
+    "reasoning_effort",
+    "verdicts",
+    "max_bullets",
+    "report_prompt",
+)
+
+
+# The daily run reads every key both phases need, so it validates them before the first
+# model call rather than failing after the investigation is already paid for.
+RUN_KEYS = tuple(dict.fromkeys(("opening",) + INVESTIGATE_KEYS + REPORT_KEYS))
 
 
 @dataclass
@@ -76,30 +90,30 @@ def _context(registry: mcp_client.Registry, services: dict) -> str:
 
 
 async def investigate(
-    cfg: dict, registry: mcp_client.Registry, services: dict, question: str | None = None
+    cfg: dict, registry: mcp_client.Registry, services: dict, opening: str
 ) -> tuple[list, Transcript]:
     """Run the bounded tool loop. Returns the conversation and what happened."""
     from openai import OpenAI
 
-    opt = {**DEFAULTS, **cfg}
-    client = OpenAI(timeout=opt["timeout"])
+    require(cfg, INVESTIGATE_KEYS, "ai")
+    client = OpenAI(timeout=cfg["timeout"])
     tools = _openai_tools(registry.tools)
     transcript = Transcript(unreachable=dict(registry.unreachable), tools_available=len(tools))
 
     conversation: list = [
-        {"role": "user", "content": f"{_context(registry, services)}\n\n{question or OPENING}"}
+        {"role": "user", "content": f"{_context(registry, services)}\n\n{opening}"}
     ]
     calls_made = 0
 
-    for turn in range(opt["max_turns"]):
+    for turn in range(cfg["max_turns"]):
         transcript.turns = turn + 1
         resp = client.responses.create(
-            model=opt["model"],
-            instructions=opt["instruction"],
+            model=cfg["model"],
+            instructions=cfg["instruction"],
             input=conversation,
             tools=tools,
-            max_output_tokens=opt["max_output_tokens"],
-            reasoning={"effort": opt["reasoning_effort"]},
+            max_output_tokens=cfg["max_output_tokens"],
+            reasoning={"effort": cfg["reasoning_effort"]},
         )
         conversation += resp.output
 
@@ -108,7 +122,7 @@ async def investigate(
             break
 
         for call in pending:
-            if calls_made >= opt["max_tool_calls"]:
+            if calls_made >= cfg["max_tool_calls"]:
                 output = json.dumps({"error": "tool call budget exhausted"})
             else:
                 calls_made += 1
@@ -119,7 +133,7 @@ async def investigate(
                 {
                     "type": "function_call_output",
                     "call_id": call.call_id,
-                    "output": output[: opt["max_result_chars"]],
+                    "output": output[: cfg["max_result_chars"]],
                 }
             )
 
@@ -130,20 +144,18 @@ def report(cfg: dict, conversation: list, name: str) -> tuple[dict | None, str |
     """Final call: no tools, strict schema. (result, error) - never raises."""
     from openai import OpenAI
 
-    opt = {**DEFAULTS, **cfg}
-    verdicts = list(cfg.get("verdicts") or {"OK": 0, "WATCH": 1, "ACTION": 1})
     try:
-        resp = OpenAI(timeout=opt["timeout"]).responses.create(
-            model=opt["model"],
-            instructions=opt["instruction"],
-            input=conversation + [{"role": "user", "content": REPORT_PROMPT}],
-            max_output_tokens=opt["max_output_tokens"],
-            reasoning={"effort": opt["reasoning_effort"]},
+        resp = OpenAI(timeout=cfg["timeout"]).responses.create(
+            model=cfg["model"],
+            instructions=cfg["instruction"],
+            input=conversation + [{"role": "user", "content": cfg["report_prompt"]}],
+            max_output_tokens=cfg["max_output_tokens"],
+            reasoning={"effort": cfg["reasoning_effort"]},
             text={
                 "format": {
                     "type": "json_schema",
                     "name": name.replace("-", "_"),
-                    "schema": ai.schema(verdicts),
+                    "schema": ai.schema(cfg["verdicts"]),
                     "strict": True,
                 }
             },
@@ -151,9 +163,9 @@ def report(cfg: dict, conversation: list, name: str) -> tuple[dict | None, str |
         result = json.loads(resp.output_text)
         bullets = [b.strip() for b in result.get("bullets", []) if b.strip()]
         bullets = [b for b in bullets if not b.lstrip("-* ").lower().startswith(("check first", "check_first"))]
-        result["bullets"] = bullets[: opt["max_bullets"]]
+        result["bullets"] = bullets[: cfg["max_bullets"]]
         if not result["bullets"]:
-            return None, f"{opt['model']} returned no findings"
+            return None, f"{cfg['model']} returned no findings"
         return result, None
     except Exception as exc:
         return None, f"{type(exc).__name__}: {exc}"[:200]
@@ -168,9 +180,11 @@ def final_text(conversation: list) -> str:
 
 
 async def _connect(cfg: dict, services: dict) -> tuple[mcp_client.Registry | None, str | None, Transcript]:
-    """Preflight shared by both entry points. (registry, error, transcript)."""
-    if not cfg.get("instruction"):
-        return None, "config has no ai.instruction", Transcript()
+    """Preflight shared by both entry points. (registry, error, transcript).
+
+    Config completeness is checked by the callers via require(); what is left here are
+    runtime conditions, which are findings rather than mistakes in the config.
+    """
     if not os.environ.get("OPENAI_API_KEY"):
         return None, "OPENAI_API_KEY is not set", Transcript()
 
@@ -187,12 +201,13 @@ async def _connect(cfg: dict, services: dict) -> tuple[mcp_client.Registry | Non
 
 async def run(cfg: dict, services: dict) -> tuple[dict | None, str | None, Transcript]:
     """Connect, investigate, report. (result, error, transcript)."""
+    require(cfg, RUN_KEYS, "ai")
     registry, error, transcript = await _connect(cfg, services)
     if error:
         return None, error, transcript
 
-    conversation, transcript = await investigate(cfg, registry, services)
-    result, error = report(cfg, conversation, cfg.get("name", "agent"))
+    conversation, transcript = await investigate(cfg, registry, services, cfg["opening"])
+    result, error = report(cfg, conversation, cfg["name"])
     return result, error, transcript
 
 
@@ -202,6 +217,7 @@ async def ask(cfg: dict, services: dict, question: str) -> tuple[str | None, str
     No report phase: a question wants an answer, not a verdict, and the strict schema
     would flatten it into bullets.
     """
+    require(cfg, INVESTIGATE_KEYS, "ai")
     registry, error, transcript = await _connect(cfg, services)
     if error:
         return None, error, transcript
@@ -209,5 +225,5 @@ async def ask(cfg: dict, services: dict, question: str) -> tuple[str | None, str
     conversation, transcript = await investigate(cfg, registry, services, question)
     answer = final_text(conversation)
     if not answer:
-        return None, f"{cfg.get('model', DEFAULTS['model'])} returned no answer", transcript
+        return None, f"{cfg['model']} returned no answer", transcript
     return answer, None, transcript

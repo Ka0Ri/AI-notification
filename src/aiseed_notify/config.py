@@ -68,6 +68,13 @@ def _expand(value):
     return value
 
 
+def require(block: dict, keys: tuple[str, ...], where: str) -> None:
+    """A config defines its whole run, so a key nobody set is an error, not a default."""
+    missing = [k for k in keys if block.get(k) is None]
+    if missing:
+        raise ConfigError(f"{where} block is missing: {', '.join(missing)}")
+
+
 def load(path: str | Path) -> dict:
     path = resolve(path)
     try:
