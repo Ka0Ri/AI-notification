@@ -135,6 +135,36 @@ Both allowlists are the spend guard for a channel other people can see; `max_tur
 `max_tool_calls` bound each individual question. A refusal is ephemeral, so only the
 asker sees it.
 
+`chat.commands` is a list of commands, each a `name`, a `description` and the `prompt`
+that becomes the question. `{yesterday}` in a prompt becomes a real date when the command
+runs. An entry may also carry `args`, a list of `name`/`description` pairs: each becomes a
+Discord argument and replaces `{name}` in the prompt, which is what lets a command act on
+a target the operator names rather than ask a fixed question.
+
+An argument may add `optional: true` plus `choices` and `confirm`:
+
+```yaml
+args:
+  - name: camera
+    description: Camera id. Leave it out to choose from a list.
+    optional: true
+    choices:
+      tool: seedcam__cameras         # namespaced tool called with no arguments
+      items: cameras                 # key in its JSON holding the list
+      value: id                      # field used as the value
+      label: site                    # field shown beside it
+      where: {type: ptz}             # rows to keep
+    confirm:
+      tool: seedcam__ptz_position    # called with {argument: <chosen value>}
+      argument: camera               # and its result shown before the command runs
+```
+
+Omitting the argument makes the bot call `choices.tool` and offer the rows as a menu;
+`confirm` then holds the command behind a Confirm/Cancel button showing that tool's
+result for the chosen value. Both are called in code rather than by the model: a list of
+what exists is data, not a judgement. Only the caller may use the menu or the buttons.
+Discord caps a menu at 25 options — a longer list is reported, never truncated.
+
 `/ask` takes no privileged intent: a slash command carries its own text, so the bot
 never receives a message it was not addressed with.
 

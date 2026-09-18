@@ -79,11 +79,38 @@ ON-demand query
 | `/ask` | `question` (required) | Investigates and replies in the channel. Public - everyone who can see the channel sees the answer. |
 | `/data-check` | none | The same investigation, asking the fixed question in `chat.commands`: today's local files against yesterday, plus which cameras are live. |
 | `/nas-check` | none | The last completed NAS sync, per target and site. The nightly run at 00:00 uploads the previous day, so this asks for yesterday - the most recent day fully accounted for. |
+| `/ptz` | `action` (required), `camera` (optional) | Points one PTZ camera: nudges it, sends it to a preset, or just reads where it looks. The only command that moves anything. Leave `camera` out and it offers a menu of the PTZ cameras; give it and it accepts the `id` or the Korean site name, which the agent resolves against `camera_status`. |
 
-`/ask` is the general form; the rest are routine checks worth a single word. A new one is
-an entry under `chat.commands` in `configs/chat.yaml` - a `name`, a `description` and the
-`prompt` that becomes the question - and nothing in the code. Restart `notify-chat` and
-Discord picks it up.
+`/ask` is the general form; the rest are routine commands worth a single word. A new one is
+an entry under `chat.commands` in `configs/chat.yaml` - a `name`, a `description`, the
+`prompt` that becomes the question, and optionally `args` - and nothing in the code.
+Restart `notify-chat` and Discord picks it up.
+
+Each entry under a command's `args` becomes a Discord argument, and `{name}` in the
+prompt is replaced by what the operator typed. That is how an action addresses a target:
+`/ptz` needs to know which camera.
+
+An argument may instead be `optional` and carry `choices`, naming the tool that lists
+what exists. Left out, the bot calls that tool and offers the answers as a menu, so an
+operator who has never seen the fleet can still run the command without knowing an id.
+`confirm` beside it names a tool to call for the chosen value and show before anything
+runs - for `/ptz` that is `ptz_position`, so the button reads the camera's current
+pan/tilt/zoom. The list and the preview are fetched in code: what exists is data, not a
+judgement, and neither costs a model turn.
+
+```
+/ptz action: left
+  🤖 Which camera?  [ NajuWanggok/cam2 · 나주왕곡  ▾ ]
+  🤖 /ptz on NajuWanggok/cam2 - now at: {"pan": 0.47, "tilt": 0.61, "zoom": 1.0}
+     [ Confirm ] [ Cancel ]
+```
+
+Only the operator who ran the command may work the menu or the buttons - the reply is
+public, so otherwise a bystander could move a camera on someone else's command. Cancel
+costs nothing: the model is never asked until Confirm is pressed. Discord caps a menu at
+25 options, so `/ptz` filters to `type: ptz` (23 of the 30 cameras; the 7 fixed ones
+cannot be pointed anyway) and says so plainly rather than truncating if the list ever
+outgrows the cap.
 
 `{yesterday}` in a prompt becomes a real date each time the command runs, because the
 model has no clock. Dating it at startup instead would go stale: the daemon outlives the
@@ -94,7 +121,17 @@ day it was started on.
 /ask check NAS data in Naju today
 /ask is any camera offline right now?
 /ask which cameras dropped compared to yesterday?
+
+/ptz camera: NajuWanggok/cam2  action: left
+/ptz camera: 나주왕곡 cam2        action: preset 3
+/ptz camera: NajuWanggok/cam2  action: where is it pointing
+/ask send 나주왕곡 cam2 back to its first preset
 ```
+
+A move is not permanent: a scheduled scan or patrol takes the camera later and leaves it
+wherever its own plan ends. Nothing restores the earlier view, so the agent reads
+`ptz_position` before it moves and reports that position alongside the new one - that
+report is the only record of where the camera was.
 
 ### Setup
 

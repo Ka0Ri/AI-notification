@@ -28,10 +28,11 @@ chat:
   deadline: 600
   max_reply_chars: 1900
 
-  # Routine checks, each registered as its own slash command taking no argument. The
-  # prompt IS the question - it goes through the same investigation as a typed /ask, so
-  # a new check is an entry here and nothing in the code. `{yesterday}` in a prompt
-  # becomes a real date when the command runs.
+  # Routine checks and actions, each registered as its own slash command. The prompt IS
+  # the question - it goes through the same investigation as a typed /ask, so a new command
+  # is an entry here and nothing in the code. `{yesterday}` in a prompt becomes a real date
+  # when the command runs, and each name under `args` becomes a Discord argument that the
+  # operator fills and that replaces `{name}` in the prompt.
   commands:
     - name: data-check
       description: Local data written today, and which cameras are live now
@@ -54,6 +55,36 @@ chat:
         scopes, so never compare one target's numbers with another's. Treat a target
         listed in `silent` as a finding, and a target with mounted true as an upload
         that is stuck. Do not call compare_days: this is the NAS, not the local disk.
+
+    - name: ptz
+      description: Point a PTZ camera - nudge it, send it to a preset, or read where it looks
+      args:
+        - name: action
+          description: left, right, up, down, zoom in, zoom out, preset 3, or where is it pointing
+        # Optional, so an operator who does not know what exists can leave it out and pick
+        # from the menu. `where` keeps the fixed cameras out - they cannot be pointed - and
+        # incidentally keeps the list under Discord's cap of 25.
+        - name: camera
+          description: Camera id. Leave it out to choose from a list.
+          optional: true
+          choices:
+            tool: seedcam__cameras
+            items: cameras
+            value: id
+            label: site
+            where: {type: ptz}
+          # Read in code and shown on the button, so the operator sees where the camera is
+          # now before anything moves. Nothing is called until Confirm is pressed.
+          confirm:
+            tool: seedcam__ptz_position
+            argument: camera
+      prompt: >
+        The operator wants this done to camera {camera}: {action}. Call `cameras` and take
+        the `id` of the row {camera} names - it may name the row by its Korean `site`
+        instead - and move nothing if it matches more than one row or none. If the action only asks where the camera points or what presets it has,
+        read and answer without moving it. Otherwise record ptz_position first, make the
+        smallest move that satisfies the action, then read ptz_position again. Report the
+        position before and after, and name the camera you moved.
 
 ai:
   model: gpt-5.4-mini
@@ -100,6 +131,38 @@ ai:
       for clarification - the operator is not waiting to be interviewed.
     - If a service the question depends on is UNREACHABLE, say so plainly instead of
       answering around it.
+
+    Moving a camera:
+    - The ptz_* tools act on a real camera, and only cameras of type 'ptz' accept them.
+      Move one only when the operator names it and says where to send it. A question that
+      merely asks about a camera is never a reason to move it.
+    - A camera is addressed by the `id` that `cameras` lists, copied exactly. Never build
+      an id yourself: the id's prefix is not the `site` field - `site` is the Korean
+      on-disk folder name and the id's prefix is a latin one, so joining them produces an
+      id no camera has. Call `cameras` to resolve a name to an id: it reads the config and
+      contacts nothing, so it is the cheap way to find out what exists. Take the row whose
+      `site`, `camera` or `id` matches what the operator typed, and pass that row's `id`.
+      If more than one row matches, or the row's `type` is not 'ptz', say which and move
+      nothing. Use camera_status only when the question needs `live` - it probes every
+      camera and takes seconds.
+    - Call ptz_position BEFORE moving and quote that position in your answer. It is the
+      only record of where the camera was, and nothing restores it afterwards. Call
+      ptz_position again after the move and quote the result too.
+    - Prefer ptz_nudge for a relative move: the webapp's own steps are 0.05 for pan and
+      tilt and 0.1 for zoom, so use those unless the operator asks for a larger move. Use
+      ptz_goto_preset for a named view, reading ptz_presets first - the numbering is
+      positional and shifts when a preset is deleted, so never reuse a remembered `n`.
+      Use ptz_move only when the operator gives all three absolute coordinates.
+    - ptz_nudge clamps at the limits rather than failing. If `moved` is false, say the
+      camera did not move and name the axes in `limit` instead of reporting success.
+    - Status 409 means a scheduled scan or patrol holds the camera: say so, and that it can
+      be retried later. 503 means the camera is unreachable right now. Do not retry either
+      one inside the same answer.
+    - A scheduled scan or patrol will take the camera later and leave it wherever its own
+      plan ends, so a manual view is not permanent. Say so when you have moved a camera.
+    - If the operator asks you to move a camera without naming one you can resolve, do not
+      guess and do not list the fleet back at them: tell them to run /ptz without the
+      camera argument, which offers the cameras as a menu to pick from.
 
     Naming: refer to a location by the `site` field (the on-disk folder name, which may be
     Korean) and a camera by its `camera` field, matching what the operator sees on disk.
