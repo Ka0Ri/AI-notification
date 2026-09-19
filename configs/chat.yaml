@@ -114,9 +114,11 @@ ai:
   model: gpt-5.4-mini
   timeout: 120
 
-  # Tighter than the daily check: one question should not fund a fleet-wide survey.
-  max_turns: 6
-  max_tool_calls: 12
+  # Room for a sweep: a camera with 9 presets costs `cameras`, `ptz_presets` and a
+  # goto/snapshot pair per preset, each pair its own turn because the move must land
+  # before the frame is pulled. 6 turns cut that off after one frame.
+  max_turns: 24
+  max_tool_calls: 24
   max_output_tokens: 4000
   reasoning_effort: low
 
