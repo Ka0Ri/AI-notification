@@ -28,6 +28,10 @@ chat:
   deadline: 600
   max_reply_chars: 1900
 
+  # Where seedcam writes its media (its DATA_DIR). A tool that saves a file reports the
+  # path relative to this, and the bot attaches the file itself to the reply.
+  media_base: /mnt/ssd/data
+
   # Routine checks and actions, each registered as its own slash command. The prompt IS
   # the question - it goes through the same investigation as a typed /ask, so a new command
   # is an entry here and nothing in the code. `{yesterday}` in a prompt becomes a real date
@@ -85,6 +89,26 @@ chat:
         read and answer without moving it. Otherwise record ptz_position first, make the
         smallest move that satisfies the action, then read ptz_position again. Report the
         position before and after, and name the camera you moved.
+
+    - name: snapshot
+      description: Capture one frame from a camera now and post it here
+      args:
+        - name: camera
+          description: Camera id. Leave it out to choose from a list.
+          optional: true
+          choices:
+            tool: seedcam__cameras
+            items: cameras
+            value: id
+            label: site
+            # snapshot works on any camera, but the fleet is over Discord's cap of 25
+            # options; a fixed camera is still reachable by typing its id.
+            where: {type: ptz}
+      prompt: >
+        Capture one frame from camera {camera} now. Call `cameras`, take the `id` of the
+        row {camera} names, and call `snapshot` once with it. Do not move the camera and do
+        not call it twice. Name the camera and its site and say the frame was captured; the
+        image is posted beside your answer, so never describe it or repeat its path.
 
 ai:
   model: gpt-5.4-mini

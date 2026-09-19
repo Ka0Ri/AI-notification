@@ -10,6 +10,7 @@ import asyncio
 import inspect
 import json
 from datetime import date, timedelta
+from pathlib import Path
 
 import discord
 from discord import app_commands
@@ -64,6 +65,23 @@ def split(text: str, limit: int) -> list[str]:
     if current:
         chunks.append(current)
     return chunks or [text]
+
+
+def attachments(paths: list[str], base: str) -> tuple[list[discord.File], list[str]]:
+    """Open the files the tools saved, so the operator sees the frame and not its path.
+
+    A tool reports where it wrote, relative to the media root this daemon reads.
+    Returns (files, what could not be opened).
+    """
+    opened: list[discord.File] = []
+    failed: list[str] = []
+    for path in paths:
+        full = Path(base) / path
+        try:
+            opened.append(discord.File(full, filename=full.name))
+        except OSError as exc:
+            failed.append(f"{path} ({exc.strerror})")
+    return opened, failed
 
 
 class Bot(discord.Client):
@@ -271,13 +289,19 @@ def build(cfg: dict, services: dict) -> Bot:
             answer, error, transcript = None, f"gave up after {chat['deadline']}s", agent.Transcript()
 
         text = body(answer, transcript) if answer else f"Could not answer: {error}"
+        files, failed = attachments(transcript.files, chat.get("media_base", ""))
+        if failed:
+            text += f"\n\nCould not attach: {', '.join(failed)}"
         print(
             f"/{label} {interaction.user}: {question!r} -> "
             f"{len(transcript.calls)} calls, {error or 'ok'}",
             flush=True,
         )
-        for chunk in split(text, chat["max_reply_chars"]):
+        chunks = split(text, chat["max_reply_chars"])
+        for chunk in chunks[:-1]:
             await interaction.followup.send(chunk)
+        # The files ride the last message, so they land under the answer.
+        await interaction.followup.send(chunks[-1], files=files)
 
     async def respond(interaction: discord.Interaction, label: str, question: str) -> None:
         if not await gate(interaction):

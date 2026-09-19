@@ -34,9 +34,11 @@ class _Response:
 class _Followup:
     def __init__(self):
         self.sent = []
+        self.files = []
 
-    async def send(self, text=None, view=None):
+    async def send(self, text=None, view=None, files=None):
         self.sent.append((text, view))
+        self.files = files or []
 
 
 class _User:
@@ -434,3 +436,31 @@ def test_naming_the_camera_skips_the_menu_but_not_the_confirmation(picker_cfg, m
     assert interaction.followup.sent == []
     assert "B/cam1" in interaction.edits[-1]["content"]
     assert [b.label for b in interaction.edits[-1]["view"].children] == ["Confirm", "Cancel"]
+
+
+def test_a_saved_frame_is_attached_to_the_reply(cfg, monkeypatch, tmp_path):
+    """The operator wants to see the frame, not the path it was written to."""
+    (tmp_path / "site/2026-09-20/cam1/ondemand").mkdir(parents=True)
+    (tmp_path / "site/2026-09-20/cam1/ondemand/14-03-22.jpg").write_bytes(b"jpeg")
+    cfg["chat"]["media_base"] = str(tmp_path)
+    cfg["chat"]["commands"] = [
+        {"name": "snapshot", "description": "one frame", "prompt": "capture one"}
+    ]
+
+    async def fake_ask(ai_cfg, services, question):
+        return "captured", None, agent.Transcript(
+            calls=["svc__snapshot({})"], files=["site/2026-09-20/cam1/ondemand/14-03-22.jpg"]
+        )
+
+    monkeypatch.setattr(agent, "ask", fake_ask)
+    client = chat.build(cfg, {"svc": {"url": "http://x/mcp"}})
+    command = client.tree.get_command("snapshot", guild=discord.Object(id=42))
+    interaction = _Interaction()
+    asyncio.run(command.callback(interaction))
+    assert [f.filename for f in interaction.followup.files] == ["14-03-22.jpg"]
+
+
+def test_a_frame_that_is_not_there_is_reported_not_swallowed(tmp_path):
+    files, failed = chat.attachments(["gone.jpg"], str(tmp_path))
+    assert files == []
+    assert failed and "gone.jpg" in failed[0]
