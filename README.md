@@ -79,6 +79,7 @@ ON-demand query
 | `/ask` | `question` (required) | Investigates and replies in the channel. Public - everyone who can see the channel sees the answer. |
 | `/data-check` | none | The same investigation, asking the fixed question in `chat.commands`: today's local files against yesterday, plus which cameras are live. |
 | `/nas-check` | none | The last completed NAS sync, per target and site. The nightly run at 00:00 uploads the previous day, so this asks for yesterday - the most recent day fully accounted for. |
+| `/snapshot` | `camera` (optional) | Captures one frame from a camera now and posts the image itself. Leave `camera` out for a menu; give it and a fixed camera works too, since `snapshot` reads any camera. Nothing moves. |
 | `/ptz` | `action` (required), `camera` (optional) | Points one PTZ camera: nudges it, sends it to a preset, or just reads where it looks. The only command that moves anything. Leave `camera` out and it offers a menu of the PTZ cameras; give it and it accepts the `id` or the Korean site name, which the agent resolves against `camera_status`. |
 
 `/ask` is the general form; the rest are routine commands worth a single word. A new one is
@@ -126,12 +127,41 @@ day it was started on.
 /ptz camera: 나주왕곡 cam2        action: preset 3
 /ptz camera: NajuWanggok/cam2  action: where is it pointing
 /ask send 나주왕곡 cam2 back to its first preset
+
+/snapshot
+/snapshot camera: Jangsu/cam1
+/ask capture a frame from Jangsu cam1 right now
+/ask send a frame at every preset on NajuDaesil cam2
 ```
 
 A move is not permanent: a scheduled scan or patrol takes the camera later and leaves it
 wherever its own plan ends. Nothing restores the earlier view, so the agent reads
 `ptz_position` before it moves and reports that position alongside the new one - that
 report is the only record of where the camera was.
+
+### Images in a reply
+
+A tool that writes a file returns where it landed, not the bytes - seedcam's `snapshot`
+pulls one frame off RTSP, saves it and answers
+`{"saved": true, "path": "장수/2026-09-20/cam1/ondemand/01-06-36.jpg", "bytes": 782028}`.
+The bot picks those paths out of the tool results, opens each file under
+`chat.media_base` and attaches it to the last message of the reply.
+
+**The model never sees the image.** It gets the path string and nothing else. It decides
+what to capture and writes the prose; attaching the file is code. Ask it what is in the
+frame and it can only guess, which is why the `/snapshot` prompt tells it never to
+describe one.
+
+Nothing in the code names `snapshot`. Any subscribed service whose tool reports a saved
+file gets that file attached, keyed on `saved` rather than `path` - `disk_usage` returns
+a path too, and that one is a directory nobody asked for. Files are attached even when
+the investigation failed to produce an answer, so a run cut short still hands over the
+frames it did take.
+
+Sweeping a camera's presets costs a turn per preset: the move has to land before the
+frame is pulled, so `ptz_goto_preset` and `snapshot` cannot share a turn. A camera with
+9 presets spends about 20 calls, which is what `max_turns` and `max_tool_calls` in
+`configs/chat.yaml` are sized for. Discord caps one message at 10 attachments.
 
 ### Setup
 
@@ -161,7 +191,7 @@ sudo systemctl restart notify-chat    # after changing the token or the instruct
 ```
 
 ```
-connected as botman#7395, /ask, /data-check, /nas-check registered guild 1206993192386568283
+connected as botman#7395, /ask, /data-check, /nas-check, /ptz, /snapshot registered guild 1206993192386568283
 /ask dangthanhvu.: 'check the NAS data' -> 2 calls, ok
 /data-check dangthanhvu.: 'Report on the local recording volume today...' -> 3 calls, ok
 ```

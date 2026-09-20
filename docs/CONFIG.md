@@ -130,6 +130,7 @@ config describes one run.
 | `chat.allowed_users` | `[]` | User ids that may ask. Empty allows everyone. |
 | `chat.deadline` | required | Seconds before a question is abandoned. Discord stops accepting the deferred reply at 900. |
 | `chat.max_reply_chars` | required | A longer answer is split across messages. |
+| `chat.media_base` | `""` | Root the paths in a tool's saved-file results resolve against. Set it to the media root of the service that writes them, or nothing can be attached. |
 
 Both allowlists are the spend guard for a channel other people can see; `max_turns` and
 `max_tool_calls` bound each individual question. A refusal is ephemeral, so only the
@@ -185,6 +186,11 @@ Run it as a daemon, not a timer — `notify install` refuses a config with no
 - **Make failure a value, not an exception.** Return
   `{"available": false, "error": ...}` rather than raising, so a broken dependency
   becomes a finding instead of ending the investigation.
+- **Report a file you saved, do not return it.** A tool that writes something the
+  operator should see answers `{"saved": true, "path": ...}`, the path relative to the
+  media root the hub knows as `chat.media_base`. The bot opens it and attaches it to the
+  reply; the model only ever sees the path. `saved` is what marks it — a `path` alone is
+  not enough, because tools report directories too.
 - **Take a date, and align the window yourself.** Today is only partly elapsed, so a
   tool comparing two days must cut both at the same hour rather than leaving that to the
   caller.
