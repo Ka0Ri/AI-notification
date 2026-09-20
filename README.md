@@ -18,14 +18,19 @@ flowchart LR
         REG -. "where to connect" .-> AGENT
     end
 
-    subgraph S1["MCP SERVER: seedcam.service<br/>127.0.0.1:8931/mcp"]
-        T1["camera_status()"]
-        T2["compare_days(date, baseline, until_hour)"]
-        T3["disk_usage()"]
-        T4["streaming_status()"]
+    subgraph S1["MCP SERVER: seedcam-mcp.service<br/>127.0.0.1:8931/mcp - 12 tools"]
+        T1["read straight off config and disk:<br/>cameras · camera_status · compare_days<br/>nas_uploads · disk_usage · streaming_status"]
+        T2["proxied to the camera process:<br/>snapshot · ptz_position · ptz_presets<br/>ptz_goto_preset · ptz_move · ptz_nudge"]
+    end
+
+    subgraph S2["seedcam.service - the camera loop<br/>control API on 127.0.0.1:8010"]
+        CTRL["records, scans, points cameras"]
     end
 
     AGENT ==> |"list_tools / call_tool"| S1
+    T2 ==> |"HTTP"| CTRL
+    CTRL --> |"saves the frame"| DISK[("/mnt/ssd/data<br/>= chat.media_base")]
+    DISK -. "chat.py attaches the file" .-> DISCORD
     AGENT --> |"reasoning"| AI["OpenAI API"]
     AGENT --> |"webhook | reply"| DISCORD(["Discord"])
     CC["Claude Code<br/>second MCP client"] -. "on demand" .-> S1
@@ -35,8 +40,15 @@ flowchart LR
 |---|---|---|---|
 | `agent.py` + registry | **MCP client** — picks tools, writes prose, computes nothing | none; it calls them | oneshot, fired by the timer |
 | `chat.py` | The same client behind a Discord `/ask` command | none; it calls them | daemon, always connected |
-| `seedcam.service` | **MCP server** in a daemon thread beside the camera loop | 4, inside the live process | always on |
+| `seedcam-mcp.service` | **MCP server**, a process of its own | 12; 6 read config and disk, 6 proxy to the camera process | always on |
+| `seedcam.service` | The camera loop, serving the control API those 6 call | none of its own | always on |
 | Claude Code | **MCP client**, read-only, via `.mcp.json` | none | interactive |
+
+Six of seedcam's tools are answered inside the MCP process; the other six are proxied
+over HTTP to the control API in the camera process, because pointing a camera or pulling
+a frame needs the loop that owns the connection. Restarting `seedcam-mcp` therefore
+publishes a new tool but not a new route behind it - a change to `snapshot` or any
+`ptz_*` needs `seedcam` restarted too.
 
 Tools always live **on the servers**, never in the hub. Adding a server adds tools the
 agent can reach; the hub itself never grows. Servers bind `127.0.0.1` only, so
