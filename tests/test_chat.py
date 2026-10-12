@@ -438,6 +438,85 @@ def test_naming_the_camera_skips_the_menu_but_not_the_confirmation(picker_cfg, m
     assert [b.label for b in interaction.edits[-1]["view"].children] == ["Confirm", "Cancel"]
 
 
+def test_a_command_without_arguments_can_still_wait_for_confirm(cfg, monkeypatch):
+    """A restart has no target to pick, but must not run on the slash command alone."""
+    cfg["chat"]["commands"] = [
+        {
+            "name": "restart",
+            "description": "restart the recorder",
+            "confirm": {"tool": "svc__recording_status"},
+            "prompt": "Restart it.",
+        }
+    ]
+    _serve(monkeypatch, {"svc__recording_status": '{"stalled": ["cam3"]}'})
+    asked = []
+
+    async def fake_ask(ai_cfg, services, question):
+        asked.append(question)
+        return "answer", None, agent.Transcript()
+
+    monkeypatch.setattr(agent, "ask", fake_ask)
+    client = chat.build(cfg, {"svc": {"url": "http://x/mcp"}})
+    command = client.tree.get_command("restart", guild=discord.Object(id=42))
+    interaction = _Interaction()
+    asyncio.run(command.callback(interaction))
+
+    staged = interaction.edits[-1]
+    assert '"stalled": ["cam3"]' in staged["content"] and "None" not in staged["content"]
+    assert asked == []
+    asyncio.run(staged["view"].yes.callback(_Interaction()))
+    assert asked == ["Restart it."]
+
+
+def test_the_model_is_told_which_commands_exist(cfg, monkeypatch):
+    cfg["chat"]["commands"] = [{"name": "restart", "description": "restart the recorder", "prompt": "Go."}]
+    seen = []
+
+    async def fake_ask(ai_cfg, services, question):
+        seen.append(ai_cfg["instruction"])
+        return "answer", None, agent.Transcript()
+
+    monkeypatch.setattr(agent, "ask", fake_ask)
+    client = chat.build(cfg, {})
+    asyncio.run(client.tree.get_command("restart", guild=discord.Object(id=42)).callback(_Interaction()))
+    assert seen[0].startswith("answer things") and "- /restart: restart the recorder" in seen[0]
+
+
+def test_a_run_tool_is_called_by_code_only_after_confirm(cfg, monkeypatch):
+    """The model only reports the action; pressing Confirm is what performs it."""
+    cfg["chat"]["commands"] = [
+        {
+            "name": "restart",
+            "description": "restart the recorder",
+            "confirm": {"tool": "svc__recording_status"},
+            "run": {"tool": "svc__restart_recording"},
+            "prompt": "It was restarted: {result}",
+        }
+    ]
+    called = []
+
+    async def call(self, name, arguments):
+        called.append(name)
+        return '{"restarted": true}' if name == "svc__restart_recording" else "{}"
+
+    monkeypatch.setattr(mcp_client.Registry, "call", call)
+    asked = []
+
+    async def fake_ask(ai_cfg, services, question):
+        asked.append(question)
+        return "answer", None, agent.Transcript()
+
+    monkeypatch.setattr(agent, "ask", fake_ask)
+    client = chat.build(cfg, {"svc": {"url": "http://x/mcp"}})
+    interaction = _Interaction()
+    asyncio.run(client.tree.get_command("restart", guild=discord.Object(id=42)).callback(interaction))
+    assert called == ["svc__recording_status"]
+
+    asyncio.run(interaction.edits[-1]["view"].yes.callback(_Interaction()))
+    assert called == ["svc__recording_status", "svc__restart_recording"]
+    assert asked == ['It was restarted: {"restarted": true}']
+
+
 def test_a_saved_frame_is_attached_to_the_reply(cfg, monkeypatch, tmp_path):
     """The operator wants to see the frame, not the path it was written to."""
     (tmp_path / "site/2026-09-20/cam1/ondemand").mkdir(parents=True)

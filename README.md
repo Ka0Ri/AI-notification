@@ -34,6 +34,12 @@ flowchart LR
     AGENT --> |"reasoning"| AI["OpenAI API"]
     AGENT --> |"webhook | reply"| DISCORD(["Discord"])
     CC["Claude Code<br/>second MCP client"] -. "on demand" .-> S1
+
+    subgraph S3["MCP SERVER on bmonitorzm: bmonitor-mcp.service<br/>100.115.16.63:8932/mcp - 4 tools"]
+        T3["recording_status · camera_alive<br/>host_health · restart_recording"]
+    end
+    AGENT ==> |"Tailscale<br/>100.115.16.63:8932"| S3
+    S3 --> |"reads config.yaml, recordings, journal;<br/>restarts on Confirm"| REC["rtsp-recording.service<br/>ffmpeg, 8 cameras on 2 Pis"]
 ```
 
 | | Role | Tools | Lifetime |
@@ -42,6 +48,7 @@ flowchart LR
 | `chat.py` | The same client behind a Discord `/ask` command | none; it calls them | daemon, always connected |
 | `seedcam-mcp.service` | **MCP server**, a process of its own | 12; 6 read config and disk, 6 proxy to the camera process | always on |
 | `seedcam.service` | The camera loop, serving the control API those 6 call | none of its own | always on |
+| `bmonitor-mcp.service` | **MCP server** on the remote host bmonitorzm, beside its ffmpeg recorder | 4; 3 read, 1 restarts the recorder | always on, there |
 | Claude Code | **MCP client**, read-only, via `.mcp.json` | none | interactive |
 
 Six of seedcam's tools are answered inside the MCP process; the other six are proxied
@@ -51,8 +58,8 @@ publishes a new tool but not a new route behind it - a change to `snapshot` or a
 `ptz_*` needs `seedcam` restarted too.
 
 Tools always live **on the servers**, never in the hub. Adding a server adds tools the
-agent can reach; the hub itself never grows. Servers bind `127.0.0.1` only, so
-there is no auth to get wrong. Transport is MCP streamable HTTP, one short-lived session
+agent can reach; the hub itself never grows. Servers bind `127.0.0.1`, or a remote
+one its Tailscale address only, so there is no auth to get wrong. Transport is MCP streamable HTTP, one short-lived session
 per call.
 
 ## Subscribing a service
@@ -69,6 +76,19 @@ services:
 That is the whole subscription — nothing in `configs/agent.yaml` changes. See
 `src/seedcam/mcp_server.py` in the seedcam repo for a reference server, and
 [docs/CONFIG.md](docs/CONFIG.md) for tool design rules and every config key.
+
+### A service on another host
+
+The server binds its host's Tailscale address and nothing else, so the tailnet is the
+only way in - never `0.0.0.0`, which would open it to that host's LAN as well.
+bmonitorzm is the example: its server is `src/bMonitorManager/mcp_server.py` in the
+bMonitor repo, run by `bmonitor-mcp.service` there, and the registry points at
+`http://100.115.16.63:8932/mcp`. If the host or the tailnet is down, the service is
+reported unreachable like any other.
+
+Neither prompt mentions bmonitor: its server's `instructions` explain the host, its
+cameras and when a restart helps, and `restart_recording` is `hidden` from the model -
+only `/bmonitor-restart` calls it, after Confirm.
 
 ## Command line
 
@@ -92,6 +112,8 @@ ON-demand query
 | `/data-check` | none | The same investigation, asking the fixed question in `chat.commands`: today's local files against yesterday, plus which cameras are live. |
 | `/nas-check` | none | The last completed NAS sync, per target and site. The nightly run at 00:00 uploads the previous day, so this asks for yesterday - the most recent day fully accounted for. |
 | `/snapshot` | `camera` (optional) | Captures one frame from a camera now and posts the image itself. Leave `camera` out for a menu; give it and a fixed camera works too, since `snapshot` reads any camera. Nothing moves. |
+| `/bmonitor-check` | none | Whether bmonitorzm is recording every camera, which streams the Pis serve, and its disks and mounts. Says whether a restart would help. |
+| `/bmonitor-restart` | none | Shows bmonitorzm's `recording_status`, then restarts its recorder on Confirm. Only fixes a stalled recorder, not a camera its Pi is not publishing. |
 | `/ptz` | `action` (required), `camera` (optional) | Points one PTZ camera: nudges it, sends it to a preset, or just reads where it looks. The only command that moves anything. Leave `camera` out and it offers a menu of the PTZ cameras; give it and it accepts the `id` or the Korean site name, which the agent resolves against `camera_status`. |
 
 `/ask` is the general form; the rest are routine commands worth a single word. A new one is

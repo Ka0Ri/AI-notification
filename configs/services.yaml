@@ -6,3 +6,9 @@ services:
   seedcam:
     url: http://127.0.0.1:8931/mcp
     description: Camera fleet - live session state, recordings, snapshots, scans
+  bmonitor:
+    # On bmonitorzm, bound to its Tailscale address only.
+    url: http://100.115.16.63:8932/mcp
+    # Never offered to the model; /bmonitor-restart calls it in code after Confirm.
+    hidden: [restart_recording]
+    description: Recording host bmonitorzm - 8 RTSP cameras on two Pis, today's recordings, stalls, disks and mounts

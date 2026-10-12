@@ -169,6 +169,23 @@ result for the chosen value. Both are called in code rather than by the model: a
 what exists is data, not a judgement. Only the caller may use the menu or the buttons.
 Discord caps a menu at 25 options — a longer list is reported, never truncated.
 
+A command with nothing to choose can still hold behind the buttons: put `confirm` on the
+entry itself, without `argument`, and its tool is called with no arguments. `run` names a
+tool the bot calls itself once Confirm is pressed; its result replaces `{result}` in the
+prompt, so the model reports the action instead of performing it.
+
+```yaml
+- name: bmonitor-restart
+  confirm:
+    tool: bmonitor__recording_status
+  run:
+    tool: bmonitor__restart_recording   # listed under `hidden` in services.yaml
+  prompt: The recorder was restarted with this result: {result}. ...
+```
+
+The model is told the configured commands by name and description, so it can point an
+operator at one.
+
 `/ask` takes no privileged intent: a slash command carries its own text, so the bot
 never receives a message it was not addressed with.
 
