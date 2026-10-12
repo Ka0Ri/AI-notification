@@ -192,6 +192,20 @@ never receives a message it was not addressed with.
 Run it as a daemon, not a timer — `notify install` refuses a config with no
 `schedule.on_calendar`. Use the committed `service/notify-chat.service`.
 
+## `configs/watch.yaml` — the alarm
+
+Same `name`, `env_file`, `registry`, `notify.discord` and `schedule` keys as the agent
+config, no `ai`, plus `watch`. Its presence is what makes `notify install` write a unit
+running `notify watch` rather than `notify agent`.
+
+| Key | Meaning |
+|-----|---------|
+| `watch.confirm_checks` | Checks in a row before an alarm fires, and clear checks before it resolves. |
+| `watch.state_file` | Open alarms between checks. Saved only after Discord accepted the post, so a failed post is retried. |
+
+A service is watched when it exposes a tool named `alarms`; one without it is skipped. An
+unreachable service raises its own alarm and holds the ones it had open.
+
 ## Writing tools for a subscribing service
 
 - **The tool owns every fact.** Counts, sizes, percentages, gap hours and the matched
@@ -202,6 +216,12 @@ Run it as a daemon, not a timer — `notify install` refuses a config with no
 - **Explain the service in the server's `instructions`.** What it is, how its results
   relate, which states are faults and what fixes each. The agent reads it before calling
   the tools, so the hub's prompts stay generic and a new service never edits them.
+- **Expose `alarms` to be watched.** It returns `{"alarms": [...], "quiet": [...]}`. Each
+  alarm is `{id, subject, severity, message}`: `id` stable across checks (it is what
+  fires and resolves), `subject` the camera or part it concerns, `severity` `critical`
+  or `warning`, and `message` the whole post - what is wrong and what fixes it. `quiet`
+  lists subjects outside their schedule, which the hub holds rather than resolves. This
+  is the one tool that judges; keep it cheap, as it runs every 10 minutes.
 - **Return data, not verdicts.** The agent decides severity. A tool that returns
   "everything is fine" removes the agent's ability to disagree.
 - **Never return a secret.** Results reach an external model and can reach Discord.

@@ -18,8 +18,8 @@ flowchart LR
         REG -. "where to connect" .-> AGENT
     end
 
-    subgraph S1["MCP SERVER: seedcam-mcp.service<br/>127.0.0.1:8931/mcp - 12 tools"]
-        T1["read straight off config and disk:<br/>cameras · camera_status · compare_days<br/>nas_uploads · disk_usage · streaming_status"]
+    subgraph S1["MCP SERVER: seedcam-mcp.service<br/>127.0.0.1:8931/mcp - 13 tools"]
+        T1["read straight off config and disk:<br/>cameras · camera_status · compare_days<br/>nas_uploads · disk_usage · streaming_status · alarms"]
         T2["proxied to the camera process:<br/>snapshot · ptz_position · ptz_presets<br/>ptz_goto_preset · ptz_move · ptz_nudge"]
     end
 
@@ -35,8 +35,8 @@ flowchart LR
     AGENT --> |"webhook | reply"| DISCORD(["Discord"])
     CC["Claude Code<br/>second MCP client"] -. "on demand" .-> S1
 
-    subgraph S3["MCP SERVER on bmonitorzm: bmonitor-mcp.service<br/>100.115.16.63:8932/mcp - 4 tools"]
-        T3["recording_status · camera_alive<br/>host_health · restart_recording"]
+    subgraph S3["MCP SERVER on bmonitorzm: bmonitor-mcp.service<br/>100.115.16.63:8932/mcp - 5 tools"]
+        T3["recording_status · camera_alive<br/>host_health · alarms · restart_recording"]
     end
     AGENT ==> |"Tailscale<br/>100.115.16.63:8932"| S3
     S3 --> |"reads config.yaml, recordings, journal;<br/>restarts on Confirm"| REC["rtsp-recording.service<br/>ffmpeg, 8 cameras on 2 Pis"]
@@ -46,12 +46,13 @@ flowchart LR
 |---|---|---|---|
 | `agent.py` + registry | **MCP client** — picks tools, writes prose, computes nothing | none; it calls them | oneshot, fired by the timer |
 | `chat.py` | The same client behind a Discord `/ask` command | none; it calls them | daemon, always connected |
-| `seedcam-mcp.service` | **MCP server**, a process of its own | 12; 6 read config and disk, 6 proxy to the camera process | always on |
+| `watch.py` | The alarm: every service's `alarms`, posting only what fired or resolved. No model | none; it calls `alarms` | oneshot, every 10 minutes |
+| `seedcam-mcp.service` | **MCP server**, a process of its own | 13; 7 read config and disk, 6 proxy to the camera process | always on |
 | `seedcam.service` | The camera loop, serving the control API those 6 call | none of its own | always on |
-| `bmonitor-mcp.service` | **MCP server** on the remote host bmonitorzm, beside its ffmpeg recorder | 4; 3 read, 1 restarts the recorder | always on, there |
+| `bmonitor-mcp.service` | **MCP server** on the remote host bmonitorzm, beside its ffmpeg recorder | 5; 4 read, 1 restarts the recorder | always on, there |
 | Claude Code | **MCP client**, read-only, via `.mcp.json` | none | interactive |
 
-Six of seedcam's tools are answered inside the MCP process; the other six are proxied
+Seven of seedcam's tools are answered inside the MCP process; the other six are proxied
 over HTTP to the control API in the camera process, because pointing a camera or pulling
 a frame needs the loop that owns the connection. Restarting `seedcam-mcp` therefore
 publishes a new tool but not a new route behind it - a change to `snapshot` or any
@@ -97,7 +98,27 @@ uv run notify services                            # which servers answer, and th
 uv run notify agent --no-post --show-transcript   # investigate, print every tool call
 uv run notify agent                               # investigate and post to Discord
 uv run notify chat                                # stay connected, answer /ask
+uv run notify watch --no-post                     # one alarm check, print what changed
 uv run notify install configs/agent.yaml          # regenerate the systemd timer
+```
+
+## The alarm
+
+The daily verdict says what was lost; the alarm says what is being lost, in time to act.
+`notify-watch.timer` runs `notify watch` every 10 minutes, 24 hours a day. It asks every
+service's `alarms` tool what is wrong right now and posts only the change: a problem
+fires after 2 checks in a row and stays silent while it lasts, and its recovery posts
+once after 2 clear checks. A camera outside its own schedule is `quiet` - neither
+judged nor resolved - so DamYang going dark at 17:00 is not an alarm, and one that
+failed at 12:30 stays open overnight until it answers in its next window.
+
+No model is involved: each server decides what counts as wrong, and the hub only compares
+one check with the last. Open alarms live in `watch.state_file` between checks.
+
+```bash
+uv run notify install configs/watch.yaml
+sudo cp service/generated/notify-watch.* /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now notify-watch.timer
 ```
 
 ## The Discord bot

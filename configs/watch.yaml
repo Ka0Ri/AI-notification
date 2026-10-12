@@ -1,0 +1,30 @@
+# The alarm watch. One config = one check, fired every 10 minutes by its timer.
+#
+# No model is called. Each subscribed service's `alarms` tool says what is wrong right now
+# and which cameras are outside their schedule; this posts only what changed since the
+# last check, so a problem is announced once and its recovery once.
+
+name: watch
+description: Alarm
+env_file: /home/aiseed/.config/aiseed-notify/env
+
+registry: configs/services.yaml
+
+watch:
+  # Checks in a row before an alarm fires or clears: 2 at 10 minutes is ~20 minutes,
+  # long enough that a stream reconnecting in seconds never posts.
+  confirm_checks: 2
+  # What has fired and is still open, kept between checks.
+  state_file: /home/aiseed/.local/state/aiseed-notify/alarms.json
+
+notify:
+  discord:
+    webhook: ${DISCORD_WEBHOOK_URL}
+    username: AI Seed Monitor
+    max_chars: 1900
+
+schedule:
+  on_calendar: "*:0/10"
+  persistent: false
+  user: aiseed
+  group: aiseed

@@ -12,7 +12,7 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart={python} -m aiseed_notify agent {config}
+ExecStart={python} -m aiseed_notify {command} {config}
 {extra_lines}StandardOutput=journal
 StandardError=journal
 """
@@ -53,6 +53,7 @@ def render(cfg: dict) -> dict[str, str]:
         f"{unit}.service": SERVICE.format(
             description=cfg["description"],
             python=sys.executable,
+            command="watch" if "watch" in cfg else "agent",
             config=cfg["path"],
             extra_lines=extra,
         ),
