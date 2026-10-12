@@ -54,11 +54,14 @@ def _openai_tools(tools: list[mcp_client.Tool]) -> list[dict]:
 
 
 def _context(registry: mcp_client.Registry, services: dict) -> str:
+    """Each service's state, then what its own server says about using it."""
     lines = ["Subscribed services:"]
     for name, entry in services.items():
         note = registry.unreachable.get(name)
         state = f"UNREACHABLE - {note}" if note else "reachable"
         lines.append(f"- {name}: {entry.get('description', '')} [{state}]")
+        if name in registry.instructions:
+            lines.append(f"  How {name} works, from its server:\n  {registry.instructions[name]}")
     return "\n".join(lines)
 
 

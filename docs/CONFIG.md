@@ -24,10 +24,13 @@ services:
   <name>:
     url: http://127.0.0.1:<port>/mcp   # required
     description: why the agent would call this service
+    hidden: [<tool>, ...]              # optional: never offered to the model
 ```
 
 `description` is passed to the model, so write it for a reader deciding whether to look
-there. Tool names are namespaced `<name>__<tool>`, so two services may both expose
+there. The server's own `instructions` follow it in the model's context. A `hidden` tool
+stays callable by code - a command's `run` - but the model never sees it, which is how an
+action is kept behind a Confirm button rather than behind a sentence in a prompt. Tool names are namespaced `<name>__<tool>`, so two services may both expose
 `disk_usage`.
 
 A service that does not answer is recorded as unreachable and reported as a finding —
@@ -179,6 +182,9 @@ Run it as a daemon, not a timer — `notify install` refuses a config with no
   never derives, recomputes or estimates a number. seedcam's `compare_days` returns the
   whole day-over-day diff in one call for exactly this reason — an unaligned window made
   a normal day read as a 19% collapse.
+- **Explain the service in the server's `instructions`.** What it is, how its results
+  relate, which states are faults and what fixes each. The agent reads it before calling
+  the tools, so the hub's prompts stay generic and a new service never edits them.
 - **Return data, not verdicts.** The agent decides severity. A tool that returns
   "everything is fine" removes the agent's ability to disagree.
 - **Never return a secret.** Results reach an external model and can reach Discord.

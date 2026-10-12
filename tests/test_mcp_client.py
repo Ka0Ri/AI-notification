@@ -21,7 +21,7 @@ def _free_port() -> int:
 @pytest.fixture(scope="module")
 def live_server():
     """A real MCP server over HTTP, so the client is tested against the real transport."""
-    server = MCPServer(name="fixture")
+    server = MCPServer(name="fixture", instructions="Echo answers with what it was given.")
 
     @server.tool()
     def echo(value: str) -> dict:
@@ -95,6 +95,20 @@ async def test_discover_and_call(live_server):
     assert reg.unreachable == {}
     assert {t.name for t in reg.tools} == {"fixture__echo", "fixture__boom"}
     assert json.loads(await reg.call("fixture__echo", {"value": "hi"})) == {"echoed": "hi"}
+
+
+@pytest.mark.anyio
+async def test_a_server_explains_itself_through_its_instructions(live_server):
+    reg = await mcp_client.discover(live_server)
+    assert reg.instructions == {"fixture": "Echo answers with what it was given."}
+
+
+@pytest.mark.anyio
+async def test_a_hidden_tool_is_not_offered_but_still_callable(live_server):
+    services = {"fixture": {**live_server["fixture"], "hidden": ["echo"]}}
+    reg = await mcp_client.discover(services)
+    assert [t.tool for t in reg.tools] == ["boom"]
+    assert json.loads(await reg.call("fixture__echo", {"value": "x"})) == {"echoed": "x"}
 
 
 @pytest.mark.anyio
