@@ -11,7 +11,7 @@ env_file: /home/aiseed/.config/aiseed-notify/env
 registry: configs/services.yaml
 
 ai:
-  model: gpt-5.4-mini
+  model: gpt-oss-120b
   timeout: 120
 
   # Bounds on the investigation, so a confused agent cannot spend unbounded money.

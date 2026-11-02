@@ -58,7 +58,7 @@ model call is paid for. The chat config needs only the keys the ask path reads: 
 | Key | Meaning | Read by |
 |-----|---------|---------|
 | `instruction` | How to investigate and what each verdict means. | both |
-| `model` | OpenAI model id. | both |
+| `model` | Model id at the Responses API endpoint (`OPENAI_BASE_URL`, default OpenAI). | both |
 | `timeout` | Seconds per model call. | both |
 | `max_turns` | Model round trips in the investigation. | both |
 | `max_tool_calls` | Total tool calls across the run. | both |

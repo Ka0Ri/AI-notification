@@ -135,7 +135,7 @@ chat:
         ok, which a restart cannot fix.
 
 ai:
-  model: gpt-5.4-mini
+  model: gpt-oss-120b
   timeout: 120
 
   # Room for a sweep: a camera with 9 presets costs `cameras`, `ptz_presets` and a
