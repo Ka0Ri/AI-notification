@@ -113,26 +113,10 @@ chat:
     - name: bmonitor-check
       description: Is bmonitorzm recording every camera, and is the host healthy
       prompt: >
-        Report on the bmonitorzm recording host. Call bmonitor recording_status,
-        camera_alive and host_health. Name every stalled camera, every camera whose
-        stream is not ok, every camera listed in last_hour, and any mount with an error
-        or above 80% used, each with its numbers. Then say whether restarting the
-        recorder would help, and why. If nothing is wrong,
-        say so and give today's files against expected_files.
-
-    - name: bmonitor-restart
-      description: Restart the recorder on bmonitorzm, after showing its current state
-      # Read in code and shown on the button; nothing restarts until Confirm is pressed.
-      confirm:
-        tool: bmonitor__recording_status
-      # Called in code on Confirm; the model never sees this tool (services.yaml `hidden`).
-      run:
-        tool: bmonitor__restart_recording
-      prompt: >
-        The operator confirmed, and the recorder on bmonitorzm was restarted with this
-        result: {result}. Call bmonitor camera_alive and report whether the restart
-        succeeded, the service state after it, and any camera whose stream is still not
-        ok, which a restart cannot fix.
+        Report on the bmonitorzm recording host. Call bmonitor camera_status,
+        compare_days, disk_usage and alarms. Name every camera that is not live, every
+        camera compare_days flags, every alarm, and the disk if above 80% used, each with
+        its numbers. If nothing is wrong, say so.
 
 ai:
   model: gpt-oss-120b
