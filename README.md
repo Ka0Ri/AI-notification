@@ -133,8 +133,7 @@ ON-demand query
 | Command | Argument | What happens |
 |---------|----------|--------------|
 | `/ask` | `question` (required) | Investigates and replies in the channel. Public - everyone who can see the channel sees the answer. |
-| `/data-check` | none | The same investigation, asking the fixed question in `chat.commands`: today's local files against yesterday, plus which cameras are live. |
-| `/nas-check` | none | The last completed NAS sync, per target and site. The nightly run at 00:00 uploads the previous day, so this asks for yesterday - the most recent day fully accounted for. |
+| `/data-check` | none | The same investigation, asking the fixed question in `chat.commands`: the files each local camera wrote recently, which cameras are live, and disk usage. |
 | `/snapshot` | `camera` (optional) | Captures one frame from a camera now and posts the image itself. Leave `camera` out for a menu; give it and a fixed camera works too, since `snapshot` reads any camera. Nothing moves. |
 | `/bmonitor-check` | none | Whether bmonitorzm is recording every camera, which streams the Pis serve, and its disks and mounts. Says whether a restart would help. |
 | `/bmonitor-restart` | none | Shows bmonitorzm's `recording_status`, then restarts its recorder on Confirm. Only fixes a stalled recorder, not a camera its Pi is not publishing. |
@@ -250,7 +249,7 @@ sudo systemctl restart notify-chat    # after changing the token or the instruct
 ```
 
 ```
-connected as botman#7395, /ask, /data-check, /nas-check, /ptz, /snapshot registered guild 1206993192386568283
+connected as botman#7395, /ask, /data-check, /ptz, /snapshot registered guild 1206993192386568283
 /ask dangthanhvu.: 'check the NAS data' -> 2 calls, ok
 /data-check dangthanhvu.: 'Report on the local recording volume today...' -> 3 calls, ok
 ```

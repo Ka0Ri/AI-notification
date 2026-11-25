@@ -39,7 +39,7 @@ chat:
   # operator fills and that replaces `{name}` in the prompt.
   commands:
     - name: data-check
-      description: Local data written today, and which cameras are live now
+      description: Files each local camera wrote recently, and which cameras are live now
       prompt: >
         Report on the local seedcam recording. Call seedcam data_status with no
         arguments for the files each camera wrote since `since`, and seedcam
@@ -47,18 +47,6 @@ chat:
         every camera that wrote no file in the window, with its newest file time.
         Schedules differ per camera, so fewer files than another camera is not a finding.
         Give the disk usage. If every camera is live and writing, say so.
-
-    - name: nas-check
-      description: The last completed NAS sync, per target and site
-      prompt: >
-        Report the last completed NAS sync. The nightly run at 00:00 uploads the
-        previous day, so call nas_uploads with date {yesterday} - that is the most
-        recent day fully accounted for, and asking for today would report an upload
-        that has not run yet as missing. Give each target's files, megabytes and
-        last_upload time, and name its largest sites. The targets sync different
-        scopes, so never compare one target's numbers with another's. Treat a target
-        listed in `silent` as a finding, and a target with mounted true as an upload
-        that is stuck. Do not call compare_days: this is the NAS, not the local disk.
 
     - name: ptz
       description: Point a PTZ camera - nudge it, send it to a preset, or read where it looks
