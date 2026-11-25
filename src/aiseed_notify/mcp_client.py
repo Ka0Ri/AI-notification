@@ -18,7 +18,7 @@ from mcp.client.streamable_http import create_mcp_http_client, streamable_http_c
 from .errors import ConfigError
 
 SEP = "__"
-DEFAULT_TIMEOUT = 15.0
+DEFAULT_TIMEOUT = 60.0
 
 
 @dataclass
