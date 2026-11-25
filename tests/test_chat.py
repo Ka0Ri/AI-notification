@@ -332,6 +332,25 @@ def test_a_filtered_out_camera_is_never_offered(picker_cfg, monkeypatch):
     assert "A/cam2" not in [o.label for o in interaction.followup.sent[-1][1].select.options]
 
 
+def test_a_result_keyed_by_id_offers_its_keys(picker_cfg, monkeypatch):
+    """seedcam's camera_status answers {id: row}; without `items` the keys are the values."""
+    spec = picker_cfg["chat"]["commands"][0]["args"][1]["choices"]
+    del spec["items"]
+    keyed = {
+        "A/cam1": {"site": "가", "type": "ptz"},
+        "A/cam2": {"site": "가", "type": "fixed"},
+        "B/cam1": {"site": "나", "type": "ptz"},
+    }
+    _serve(monkeypatch, {"svc__camera_status": json.dumps(keyed)})
+    client = chat.build(picker_cfg, {"svc": {"url": "http://x/mcp"}})
+    command = client.tree.get_command("ptz", guild=discord.Object(id=42))
+    interaction = _Interaction()
+    asyncio.run(command.callback(interaction, action="left", camera=None))
+
+    options = interaction.followup.sent[-1][1].select.options
+    assert [(o.label, o.description) for o in options] == [("A/cam1", "가"), ("B/cam1", "나")]
+
+
 def test_too_many_options_says_so_instead_of_dropping_some(picker_cfg, monkeypatch):
     """Silently truncating would hide cameras the operator is entitled to see."""
     fleet = {"cameras": [{"id": f"A/cam{i}", "site": "가", "type": "ptz"} for i in range(40)]}

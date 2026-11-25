@@ -128,7 +128,12 @@ async def choices(services: dict, spec: dict) -> tuple[list[discord.SelectOption
     """
     raw = await mcp_client.Registry(services=services).call(spec["tool"], {})
     try:
-        items = json.loads(raw)[spec["items"]]
+        data = json.loads(raw)
+        if "items" in spec:
+            items = data[spec["items"]]
+        else:
+            # No `items`: the result is {value: row}, as seedcam's camera_status answers.
+            items = [{spec["value"]: key, **row} for key, row in data.items()]
         keep = (spec.get("where") or {}).items()
         items = [i for i in items if all(i.get(k) == v for k, v in keep)]
         return [
