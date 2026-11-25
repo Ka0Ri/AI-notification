@@ -24,10 +24,13 @@ services:
   <name>:
     url: http://127.0.0.1:<port>/mcp   # required
     description: why the agent would call this service
+    hidden: [<tool>, ...]              # optional: never offered to the model
 ```
 
 `description` is passed to the model, so write it for a reader deciding whether to look
-there. Tool names are namespaced `<name>__<tool>`, so two services may both expose
+there. The server's own `instructions` follow it in the model's context. A `hidden` tool
+stays callable by code - a command's `run` - but the model never sees it, which is how an
+action is kept behind a Confirm button rather than behind a sentence in a prompt. Tool names are namespaced `<name>__<tool>`, so two services may both expose
 `disk_usage`.
 
 A service that does not answer is recorded as unreachable and reported as a finding —
@@ -55,7 +58,7 @@ model call is paid for. The chat config needs only the keys the ask path reads: 
 | Key | Meaning | Read by |
 |-----|---------|---------|
 | `instruction` | How to investigate and what each verdict means. | both |
-| `model` | OpenAI model id. | both |
+| `model` | Model id at the Responses API endpoint (`OPENAI_BASE_URL`, default OpenAI). | both |
 | `timeout` | Seconds per model call. | both |
 | `max_turns` | Model round trips in the investigation. | both |
 | `max_tool_calls` | Total tool calls across the run. | both |
@@ -130,6 +133,7 @@ config describes one run.
 | `chat.allowed_users` | `[]` | User ids that may ask. Empty allows everyone. |
 | `chat.deadline` | required | Seconds before a question is abandoned. Discord stops accepting the deferred reply at 900. |
 | `chat.max_reply_chars` | required | A longer answer is split across messages. |
+| `chat.media_base` | `""` | Root the paths in a tool's saved-file results resolve against. Set it to the media root of the service that writes them, or nothing can be attached. |
 
 Both allowlists are the spend guard for a channel other people can see; `max_turns` and
 `max_tool_calls` bound each individual question. A refusal is ephemeral, so only the
@@ -149,13 +153,13 @@ args:
     description: Camera id. Leave it out to choose from a list.
     optional: true
     choices:
-      tool: seedcam__cameras         # namespaced tool called with no arguments
-      items: cameras                 # key in its JSON holding the list
+      tool: seedcam__camera_status   # namespaced tool called with no arguments
+      items: cameras                 # key holding the list; omit for a result keyed by value
       value: id                      # field used as the value
       label: site                    # field shown beside it
       where: {type: ptz}             # rows to keep
     confirm:
-      tool: seedcam__ptz_position    # called with {argument: <chosen value>}
+      tool: seedcam__camera_status   # called with {argument: <chosen value>}
       argument: camera               # and its result shown before the command runs
 ```
 
@@ -165,11 +169,42 @@ result for the chosen value. Both are called in code rather than by the model: a
 what exists is data, not a judgement. Only the caller may use the menu or the buttons.
 Discord caps a menu at 25 options — a longer list is reported, never truncated.
 
+A command with nothing to choose can still hold behind the buttons: put `confirm` on the
+entry itself, without `argument`, and its tool is called with no arguments. `run` names a
+tool the bot calls itself once Confirm is pressed; its result replaces `{result}` in the
+prompt, so the model reports the action instead of performing it.
+
+```yaml
+- name: bmonitor-restart
+  confirm:
+    tool: bmonitor__recording_status
+  run:
+    tool: bmonitor__restart_recording   # listed under `hidden` in services.yaml
+  prompt: The recorder was restarted with this result: {result}. ...
+```
+
+The model is told the configured commands by name and description, so it can point an
+operator at one.
+
 `/ask` takes no privileged intent: a slash command carries its own text, so the bot
 never receives a message it was not addressed with.
 
 Run it as a daemon, not a timer — `notify install` refuses a config with no
 `schedule.on_calendar`. Use the committed `service/notify-chat.service`.
+
+## `configs/watch.yaml` — the alarm
+
+Same `name`, `env_file`, `registry`, `notify.discord` and `schedule` keys as the agent
+config, no `ai`, plus `watch`. Its presence is what makes `notify install` write a unit
+running `notify watch` rather than `notify agent`.
+
+| Key | Meaning |
+|-----|---------|
+| `watch.confirm_checks` | Checks in a row before an alarm fires, and clear checks before it resolves. |
+| `watch.state_file` | Open alarms between checks. Saved only after Discord accepted the post, so a failed post is retried. |
+
+A service is watched when it exposes a tool named `alarms`; one without it is skipped. An
+unreachable service raises its own alarm and holds the ones it had open.
 
 ## Writing tools for a subscribing service
 
@@ -178,6 +213,15 @@ Run it as a daemon, not a timer — `notify install` refuses a config with no
   never derives, recomputes or estimates a number. seedcam's `compare_days` returns the
   whole day-over-day diff in one call for exactly this reason — an unaligned window made
   a normal day read as a 19% collapse.
+- **Explain the service in the server's `instructions`.** What it is, how its results
+  relate, which states are faults and what fixes each. The agent reads it before calling
+  the tools, so the hub's prompts stay generic and a new service never edits them.
+- **Expose `alarms` to be watched.** It returns `{"alarms": [...], "quiet": [...]}`. Each
+  alarm is `{id, subject, severity, message}`: `id` stable across checks (it is what
+  fires and resolves), `subject` the camera or part it concerns, `severity` `critical`
+  or `warning`, and `message` the whole post - what is wrong and what fixes it. `quiet`
+  lists subjects outside their schedule, which the hub holds rather than resolves. This
+  is the one tool that judges; keep it cheap, as it runs every 10 minutes.
 - **Return data, not verdicts.** The agent decides severity. A tool that returns
   "everything is fine" removes the agent's ability to disagree.
 - **Never return a secret.** Results reach an external model and can reach Discord.
@@ -185,6 +229,11 @@ Run it as a daemon, not a timer — `notify install` refuses a config with no
 - **Make failure a value, not an exception.** Return
   `{"available": false, "error": ...}` rather than raising, so a broken dependency
   becomes a finding instead of ending the investigation.
+- **Report a file you saved, do not return it.** A tool that writes something the
+  operator should see answers `{"saved": true, "path": ...}`, the path relative to the
+  media root the hub knows as `chat.media_base`. The bot opens it and attaches it to the
+  reply; the model only ever sees the path. `saved` is what marks it — a `path` alone is
+  not enough, because tools report directories too.
 - **Take a date, and align the window yourself.** Today is only partly elapsed, so a
   tool comparing two days must cut both at the same hour rather than leaving that to the
   caller.

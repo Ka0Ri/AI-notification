@@ -7,7 +7,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from . import agent, discord, mcp_client, systemd
+from . import agent, discord, mcp_client, systemd, watch
 from .ai import summary_text
 from .config import load
 from .errors import NotifyError
@@ -93,6 +93,26 @@ def cmd_chat(args) -> int:
     return 0
 
 
+def cmd_watch(args) -> int:
+    """One alarm check: post what fired or resolved since the last one, and nothing else."""
+    cfg = load(args.config)
+    services = mcp_client.load_registry(_registry_path(cfg))
+    wcfg = cfg["watch"]
+    path = Path(wcfg["state_file"])
+
+    found, quiet = asyncio.run(watch.current(services))
+    state = watch.load_state(path)
+    fired, resolved = watch.step(state, found, quiet, wcfg["confirm_checks"], watch.now_label())
+    print(f"{len(found)} active, {len(fired)} fired, {len(resolved)} resolved, {len(quiet)} quiet")
+    if (fired or resolved) and not args.no_post:
+        # State is saved only after Discord took it, so a failed post is retried next check.
+        discord.post(cfg["notify"]["discord"], f"{cfg['description']}", watch.message(fired, resolved), watch.now_label())
+    elif fired or resolved:
+        print(watch.message(fired, resolved))
+    watch.save_state(path, state)
+    return 0
+
+
 def cmd_install(args) -> int:
     cfg = load(args.config)
     units = systemd.render(cfg)
@@ -134,6 +154,11 @@ def main() -> int:
     ch = sub.add_parser("chat", help="answer /ask in Discord by investigating on demand")
     ch.add_argument("config", nargs="?", default="configs/chat.yaml", help="chat config (default: configs/chat.yaml)")
     ch.set_defaults(func=cmd_chat)
+
+    wa = sub.add_parser("watch", help="one alarm check: post only what fired or resolved")
+    wa.add_argument("config", nargs="?", default="configs/watch.yaml", help="watch config (default: configs/watch.yaml)")
+    wa.add_argument("--no-post", action="store_true", help="print the changes instead of posting them")
+    wa.set_defaults(func=cmd_watch)
 
     install = sub.add_parser("install", help="generate the systemd .service/.timer pair")
     install.add_argument("config", help="config path, or a name under $NOTIFY_CONFIG_DIR")

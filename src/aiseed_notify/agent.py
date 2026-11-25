@@ -22,6 +22,22 @@ class Transcript:
     turns: int = 0
     unreachable: dict[str, str] = field(default_factory=dict)
     tools_available: int = 0
+    files: list[str] = field(default_factory=list)
+
+
+def _saved(output: str) -> list[str]:
+    """The path of a file a tool just wrote, so a caller can hand it over.
+
+    Keyed on `saved` rather than `path`: disk_usage reports a path too, and that one
+    is a directory nobody asked for.
+    """
+    try:
+        result = json.loads(output)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if isinstance(result, dict) and result.get("saved") and result.get("path"):
+        return [str(result["path"])]
+    return []
 
 
 def _openai_tools(tools: list[mcp_client.Tool]) -> list[dict]:
@@ -38,11 +54,14 @@ def _openai_tools(tools: list[mcp_client.Tool]) -> list[dict]:
 
 
 def _context(registry: mcp_client.Registry, services: dict) -> str:
+    """Each service's state, then what its own server says about using it."""
     lines = ["Subscribed services:"]
     for name, entry in services.items():
         note = registry.unreachable.get(name)
         state = f"UNREACHABLE - {note}" if note else "reachable"
         lines.append(f"- {name}: {entry.get('description', '')} [{state}]")
+        if name in registry.instructions:
+            lines.append(f"  How {name} works, from its server:\n  {registry.instructions[name]}")
     return "\n".join(lines)
 
 
@@ -85,6 +104,7 @@ async def investigate(
                 args = json.loads(call.arguments or "{}")
                 output = await registry.call(call.name, args)
                 transcript.calls.append(f"{call.name}({call.arguments})")
+                transcript.files += _saved(output)
             conversation.append(
                 {
                     "type": "function_call_output",

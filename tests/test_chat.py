@@ -34,9 +34,11 @@ class _Response:
 class _Followup:
     def __init__(self):
         self.sent = []
+        self.files = []
 
-    async def send(self, text=None, view=None):
+    async def send(self, text=None, view=None, files=None):
         self.sent.append((text, view))
+        self.files = files or []
 
 
 class _User:
@@ -330,6 +332,25 @@ def test_a_filtered_out_camera_is_never_offered(picker_cfg, monkeypatch):
     assert "A/cam2" not in [o.label for o in interaction.followup.sent[-1][1].select.options]
 
 
+def test_a_result_keyed_by_id_offers_its_keys(picker_cfg, monkeypatch):
+    """seedcam's camera_status answers {id: row}; without `items` the keys are the values."""
+    spec = picker_cfg["chat"]["commands"][0]["args"][1]["choices"]
+    del spec["items"]
+    keyed = {
+        "A/cam1": {"site": "가", "type": "ptz"},
+        "A/cam2": {"site": "가", "type": "fixed"},
+        "B/cam1": {"site": "나", "type": "ptz"},
+    }
+    _serve(monkeypatch, {"svc__camera_status": json.dumps(keyed)})
+    client = chat.build(picker_cfg, {"svc": {"url": "http://x/mcp"}})
+    command = client.tree.get_command("ptz", guild=discord.Object(id=42))
+    interaction = _Interaction()
+    asyncio.run(command.callback(interaction, action="left", camera=None))
+
+    options = interaction.followup.sent[-1][1].select.options
+    assert [(o.label, o.description) for o in options] == [("A/cam1", "가"), ("B/cam1", "나")]
+
+
 def test_too_many_options_says_so_instead_of_dropping_some(picker_cfg, monkeypatch):
     """Silently truncating would hide cameras the operator is entitled to see."""
     fleet = {"cameras": [{"id": f"A/cam{i}", "site": "가", "type": "ptz"} for i in range(40)]}
@@ -434,3 +455,110 @@ def test_naming_the_camera_skips_the_menu_but_not_the_confirmation(picker_cfg, m
     assert interaction.followup.sent == []
     assert "B/cam1" in interaction.edits[-1]["content"]
     assert [b.label for b in interaction.edits[-1]["view"].children] == ["Confirm", "Cancel"]
+
+
+def test_a_command_without_arguments_can_still_wait_for_confirm(cfg, monkeypatch):
+    """A restart has no target to pick, but must not run on the slash command alone."""
+    cfg["chat"]["commands"] = [
+        {
+            "name": "restart",
+            "description": "restart the recorder",
+            "confirm": {"tool": "svc__recording_status"},
+            "prompt": "Restart it.",
+        }
+    ]
+    _serve(monkeypatch, {"svc__recording_status": '{"stalled": ["cam3"]}'})
+    asked = []
+
+    async def fake_ask(ai_cfg, services, question):
+        asked.append(question)
+        return "answer", None, agent.Transcript()
+
+    monkeypatch.setattr(agent, "ask", fake_ask)
+    client = chat.build(cfg, {"svc": {"url": "http://x/mcp"}})
+    command = client.tree.get_command("restart", guild=discord.Object(id=42))
+    interaction = _Interaction()
+    asyncio.run(command.callback(interaction))
+
+    staged = interaction.edits[-1]
+    assert '"stalled": ["cam3"]' in staged["content"] and "None" not in staged["content"]
+    assert asked == []
+    asyncio.run(staged["view"].yes.callback(_Interaction()))
+    assert asked == ["Restart it."]
+
+
+def test_the_model_is_told_which_commands_exist(cfg, monkeypatch):
+    cfg["chat"]["commands"] = [{"name": "restart", "description": "restart the recorder", "prompt": "Go."}]
+    seen = []
+
+    async def fake_ask(ai_cfg, services, question):
+        seen.append(ai_cfg["instruction"])
+        return "answer", None, agent.Transcript()
+
+    monkeypatch.setattr(agent, "ask", fake_ask)
+    client = chat.build(cfg, {})
+    asyncio.run(client.tree.get_command("restart", guild=discord.Object(id=42)).callback(_Interaction()))
+    assert seen[0].startswith("answer things") and "- /restart: restart the recorder" in seen[0]
+
+
+def test_a_run_tool_is_called_by_code_only_after_confirm(cfg, monkeypatch):
+    """The model only reports the action; pressing Confirm is what performs it."""
+    cfg["chat"]["commands"] = [
+        {
+            "name": "restart",
+            "description": "restart the recorder",
+            "confirm": {"tool": "svc__recording_status"},
+            "run": {"tool": "svc__restart_recording"},
+            "prompt": "It was restarted: {result}",
+        }
+    ]
+    called = []
+
+    async def call(self, name, arguments):
+        called.append(name)
+        return '{"restarted": true}' if name == "svc__restart_recording" else "{}"
+
+    monkeypatch.setattr(mcp_client.Registry, "call", call)
+    asked = []
+
+    async def fake_ask(ai_cfg, services, question):
+        asked.append(question)
+        return "answer", None, agent.Transcript()
+
+    monkeypatch.setattr(agent, "ask", fake_ask)
+    client = chat.build(cfg, {"svc": {"url": "http://x/mcp"}})
+    interaction = _Interaction()
+    asyncio.run(client.tree.get_command("restart", guild=discord.Object(id=42)).callback(interaction))
+    assert called == ["svc__recording_status"]
+
+    asyncio.run(interaction.edits[-1]["view"].yes.callback(_Interaction()))
+    assert called == ["svc__recording_status", "svc__restart_recording"]
+    assert asked == ['It was restarted: {"restarted": true}']
+
+
+def test_a_saved_frame_is_attached_to_the_reply(cfg, monkeypatch, tmp_path):
+    """The operator wants to see the frame, not the path it was written to."""
+    (tmp_path / "site/2026-09-20/cam1/ondemand").mkdir(parents=True)
+    (tmp_path / "site/2026-09-20/cam1/ondemand/14-03-22.jpg").write_bytes(b"jpeg")
+    cfg["chat"]["media_base"] = str(tmp_path)
+    cfg["chat"]["commands"] = [
+        {"name": "snapshot", "description": "one frame", "prompt": "capture one"}
+    ]
+
+    async def fake_ask(ai_cfg, services, question):
+        return "captured", None, agent.Transcript(
+            calls=["svc__snapshot({})"], files=["site/2026-09-20/cam1/ondemand/14-03-22.jpg"]
+        )
+
+    monkeypatch.setattr(agent, "ask", fake_ask)
+    client = chat.build(cfg, {"svc": {"url": "http://x/mcp"}})
+    command = client.tree.get_command("snapshot", guild=discord.Object(id=42))
+    interaction = _Interaction()
+    asyncio.run(command.callback(interaction))
+    assert [f.filename for f in interaction.followup.files] == ["14-03-22.jpg"]
+
+
+def test_a_frame_that_is_not_there_is_reported_not_swallowed(tmp_path):
+    files, failed = chat.attachments(["gone.jpg"], str(tmp_path))
+    assert files == []
+    assert failed and "gone.jpg" in failed[0]

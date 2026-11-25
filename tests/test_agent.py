@@ -229,3 +229,31 @@ def test_ask_refuses_when_every_service_is_down(cfg, monkeypatch):
     _live_registry(monkeypatch, mcp_client.Registry(unreachable={"svc": "ConnectError: refused"}))
     answer, error, _ = asyncio.run(agent.ask(cfg, {"svc": {}}, "anything?"))
     assert answer is None and "every service unreachable" in error
+
+
+def test_a_saved_file_is_recorded_for_the_caller(cfg, monkeypatch):
+    """A tool that writes a frame reports where; the transcript carries it to Discord."""
+
+    class Saver(_Registry):
+        async def call(self, name, arguments):
+            self.seen.append((name, arguments))
+            return json.dumps({"saved": True, "path": "site/2026-09-20/cam1/ondemand/14-03-22.jpg"})
+
+    fake = _FakeOpenAI([[_fn_call("svc__snapshot", "c1")], []])
+    monkeypatch.setattr("openai.OpenAI", fake)
+    _, t = asyncio.run(agent.investigate(cfg, Saver([_tool("snapshot")]), {"svc": {}}, "go"))
+    assert t.files == ["site/2026-09-20/cam1/ondemand/14-03-22.jpg"]
+
+
+def test_a_path_that_is_not_a_saved_file_is_not_recorded(cfg, monkeypatch):
+    """disk_usage reports a path too - a directory, and not one to attach."""
+
+    class Usage(_Registry):
+        async def call(self, name, arguments):
+            self.seen.append((name, arguments))
+            return json.dumps({"path": "/mnt/ssd/data", "used_pct": 78})
+
+    fake = _FakeOpenAI([[_fn_call("svc__disk_usage", "c1")], []])
+    monkeypatch.setattr("openai.OpenAI", fake)
+    _, t = asyncio.run(agent.investigate(cfg, Usage([_tool("disk_usage")]), {"svc": {}}, "go"))
+    assert t.files == []

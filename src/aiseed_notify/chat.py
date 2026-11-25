@@ -10,6 +10,7 @@ import asyncio
 import inspect
 import json
 from datetime import date, timedelta
+from pathlib import Path
 
 import discord
 from discord import app_commands
@@ -19,6 +20,8 @@ from .errors import ConfigError
 
 # Discord rejects a select menu with more than this many options.
 CHOICE_LIMIT = 25
+# What a confirmation shows of the tool's answer, inside Discord's 2000-character message.
+PREVIEW_CHARS = 1700
 
 
 def refusal(cfg: dict, channel_id: int | None, user_id: int) -> str | None:
@@ -66,6 +69,23 @@ def split(text: str, limit: int) -> list[str]:
     return chunks or [text]
 
 
+def attachments(paths: list[str], base: str) -> tuple[list[discord.File], list[str]]:
+    """Open the files the tools saved, so the operator sees the frame and not its path.
+
+    A tool reports where it wrote, relative to the media root this daemon reads.
+    Returns (files, what could not be opened).
+    """
+    opened: list[discord.File] = []
+    failed: list[str] = []
+    for path in paths:
+        full = Path(base) / path
+        try:
+            opened.append(discord.File(full, filename=full.name))
+        except OSError as exc:
+            failed.append(f"{path} ({exc.strerror})")
+    return opened, failed
+
+
 class Bot(discord.Client):
     """Registers the commands on startup, guild-scoped when configured so they appear at once."""
 
@@ -108,7 +128,12 @@ async def choices(services: dict, spec: dict) -> tuple[list[discord.SelectOption
     """
     raw = await mcp_client.Registry(services=services).call(spec["tool"], {})
     try:
-        items = json.loads(raw)[spec["items"]]
+        data = json.loads(raw)
+        if "items" in spec:
+            items = data[spec["items"]]
+        else:
+            # No `items`: the result is {value: row}, as seedcam's camera_status answers.
+            items = [{spec["value"]: key, **row} for key, row in data.items()]
         keep = (spec.get("where") or {}).items()
         items = [i for i in items if all(i.get(k) == v for k, v in keep)]
         return [
@@ -204,19 +229,26 @@ def _register_fixed(client: Bot, guild, entry: dict, gate, answer, services: dic
         async def run(inter: discord.Interaction, chosen: str | None) -> None:
             picked = {**values, chooser["name"]: chosen} if chooser else values
             # Dated per invocation: the daemon outlives the day it started.
-            await answer(inter, entry["name"], filled(entry["prompt"], picked))
+            question = filled(entry["prompt"], picked)
+            if entry.get("run"):
+                # The action is called here, not by the model, so it cannot happen unconfirmed.
+                result = await mcp_client.Registry(services=services).call(entry["run"]["tool"], {})
+                question = question.replace("{result}", result)
+            await answer(inter, entry["name"], question)
 
         async def stage(inter: discord.Interaction, chosen: str | None) -> None:
             """Show what is about to happen, and wait for the button."""
-            spec = (chooser or {}).get("confirm")
+            # A command with no target confirms at its own level, on the tool's whole answer.
+            spec = (chooser or entry).get("confirm")
             if not spec:
                 await run(inter, chosen)
                 return
             detail = await mcp_client.Registry(services=services).call(
-                spec["tool"], {spec["argument"]: chosen}
+                spec["tool"], {spec["argument"]: chosen} if chooser else {}
             )
+            target = f" on **{chosen}**" if chooser else ""
             await inter.edit_original_response(
-                content=f"`/{entry['name']}` on **{chosen}** - now at:\n```\n{detail[:800]}\n```",
+                content=f"`/{entry['name']}`{target} - now at:\n```\n{detail[:PREVIEW_CHARS]}\n```",
                 view=Confirm(inter.user.id, chosen, run),
             )
 
@@ -250,7 +282,13 @@ def _register_fixed(client: Bot, guild, entry: dict, gate, answer, services: dic
 def build(cfg: dict, services: dict) -> Bot:
     """Wire the commands to the agent. Split from serve() so it can be built without a token."""
     chat = cfg.get("chat") or {}
-    ai_cfg = {**cfg["ai"], "name": cfg["name"]}
+    # Listed from the config, so the model can name a command that exists and no other.
+    commands = "\n".join(f"- /{c['name']}: {c['description']}" for c in chat.get("commands") or [])
+    ai_cfg = {
+        **cfg["ai"],
+        "name": cfg["name"],
+        "instruction": f"{cfg['ai']['instruction']}\nOperator commands:\n{commands}\n",
+    }
     guild = discord.Object(id=int(chat["guild_id"])) if chat.get("guild_id") else None
     client = Bot(guild)
 
@@ -271,13 +309,19 @@ def build(cfg: dict, services: dict) -> Bot:
             answer, error, transcript = None, f"gave up after {chat['deadline']}s", agent.Transcript()
 
         text = body(answer, transcript) if answer else f"Could not answer: {error}"
+        files, failed = attachments(transcript.files, chat.get("media_base", ""))
+        if failed:
+            text += f"\n\nCould not attach: {', '.join(failed)}"
         print(
             f"/{label} {interaction.user}: {question!r} -> "
             f"{len(transcript.calls)} calls, {error or 'ok'}",
             flush=True,
         )
-        for chunk in split(text, chat["max_reply_chars"]):
+        chunks = split(text, chat["max_reply_chars"])
+        for chunk in chunks[:-1]:
             await interaction.followup.send(chunk)
+        # The files ride the last message, so they land under the answer.
+        await interaction.followup.send(chunks[-1], files=files)
 
     async def respond(interaction: discord.Interaction, label: str, question: str) -> None:
         if not await gate(interaction):

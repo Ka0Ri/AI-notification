@@ -18,7 +18,7 @@ from mcp.client.streamable_http import create_mcp_http_client, streamable_http_c
 from .errors import ConfigError
 
 SEP = "__"
-DEFAULT_TIMEOUT = 15.0
+DEFAULT_TIMEOUT = 60.0
 
 
 @dataclass
@@ -71,6 +71,8 @@ class Registry:
     timeout: float = DEFAULT_TIMEOUT
     tools: list[Tool] = field(default_factory=list)
     unreachable: dict[str, str] = field(default_factory=dict)
+    # What each server says about itself in its `instructions`, by service name.
+    instructions: dict[str, str] = field(default_factory=dict)
 
     async def call(self, name: str, arguments: dict) -> str:
         """Call a namespaced tool and return its result as text for the model."""
@@ -107,19 +109,26 @@ def load_registry(path: str | Path) -> dict:
 
 
 async def discover(services: dict, timeout: float = DEFAULT_TIMEOUT) -> Registry:
-    """List the tools of every service. An unreachable one is recorded, not raised.
+    """List the tools and instructions of every service. An unreachable one is recorded, not raised.
 
-    A service being down is a finding the agent should report, not a crash.
+    A service being down is a finding the agent should report, not a crash. Tools named
+    in the entry's `hidden` stay callable by code but are never offered to the model.
     """
     registry = Registry(services=services, timeout=timeout)
     for name, entry in services.items():
         try:
             async with session_for(entry["url"], timeout) as session:
                 listed = await session.list_tools()
+                instructions = session.instructions
         except Exception as exc:
             registry.unreachable[name] = describe(exc)
             continue
+        if instructions:
+            registry.instructions[name] = instructions.strip()
+        hidden = set(entry.get("hidden") or [])
         for t in listed.tools:
+            if t.name in hidden:
+                continue
             registry.tools.append(
                 Tool(
                     name=f"{name}{SEP}{t.name}",
