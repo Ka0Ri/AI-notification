@@ -101,10 +101,12 @@ chat:
     - name: bmonitor-check
       description: Is bmonitorzm recording every camera, and is the host healthy
       prompt: >
-        Report on the bmonitorzm recording host. Call bmonitor camera_status,
-        compare_days, disk_usage and alarms. Name every camera that is not live, every
-        camera compare_days flags, every alarm, and the disk if above 80% used, each with
-        its numbers. If nothing is wrong, say so.
+        Report on the bmonitorzm recording host. Call bmonitor data_status with no
+        arguments for the files each camera wrote since `since`, and bmonitor
+        camera_status for which cameras are live. Name every camera that is not live and
+        every camera that wrote no file in the window, with its newest file time.
+        Schedules differ per camera, so fewer files than another camera is not a finding.
+        Give the disk usage and say so if it is above 80% used. If nothing is wrong, say so.
 
 ai:
   model: gpt-oss-120b
