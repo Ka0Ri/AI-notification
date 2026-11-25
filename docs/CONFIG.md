@@ -153,13 +153,13 @@ args:
     description: Camera id. Leave it out to choose from a list.
     optional: true
     choices:
-      tool: seedcam__cameras         # namespaced tool called with no arguments
-      items: cameras                 # key in its JSON holding the list
+      tool: seedcam__camera_status   # namespaced tool called with no arguments
+      items: cameras                 # key holding the list; omit for a result keyed by value
       value: id                      # field used as the value
       label: site                    # field shown beside it
       where: {type: ptz}             # rows to keep
     confirm:
-      tool: seedcam__ptz_position    # called with {argument: <chosen value>}
+      tool: seedcam__camera_status   # called with {argument: <chosen value>}
       argument: camera               # and its result shown before the command runs
 ```
 
