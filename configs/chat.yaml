@@ -41,12 +41,12 @@ chat:
     - name: data-check
       description: Local data written today, and which cameras are live now
       prompt: >
-        Report on the local recording volume today. Call compare_days with no arguments
-        for today's files against yesterday over the matched window, camera_status for
-        which cameras are live, and streaming_status. Name every camera compare_days
-        flagged and every camera that is not live, with its numbers and the window it
-        covers. If nothing is flagged and every camera is live, say so and give the
-        fleet totals and the disk usage.
+        Report on the local seedcam recording. Call seedcam data_status with no
+        arguments for the files each camera wrote since `since`, and seedcam
+        camera_status for which cameras are live. Name every camera that is not live and
+        every camera that wrote no file in the window, with its newest file time.
+        Schedules differ per camera, so fewer files than another camera is not a finding.
+        Give the disk usage. If every camera is live and writing, say so.
 
     - name: nas-check
       description: The last completed NAS sync, per target and site
@@ -72,23 +72,24 @@ chat:
           description: Camera id. Leave it out to choose from a list.
           optional: true
           choices:
-            tool: seedcam__cameras
-            items: cameras
+            tool: seedcam__camera_status
             value: id
             label: site
             where: {type: ptz}
           # Read in code and shown on the button, so the operator sees where the camera is
           # now before anything moves. Nothing is called until Confirm is pressed.
           confirm:
-            tool: seedcam__ptz_position
+            tool: seedcam__camera_status
             argument: camera
       prompt: >
-        The operator wants this done to camera {camera}: {action}. Call `cameras` and take
-        the `id` of the row {camera} names - it may name the row by its Korean `site`
-        instead - and move nothing if it matches more than one row or none. If the action only asks where the camera points or what presets it has,
-        read and answer without moving it. Otherwise record ptz_position first, make the
-        smallest move that satisfies the action, then read ptz_position again. Report the
-        position before and after, and name the camera you moved.
+        The operator wants this done to camera {camera}: {action}. Call seedcam
+        camera_status with no arguments and take the id {camera} names - it may name the
+        camera by its Korean `site` instead - and move nothing if it matches more than one
+        id or none. If the action only asks where the camera points or what presets it
+        has, read and answer without moving it. Otherwise read its position from
+        camera_status, call `move` once with the preset, or with pan, tilt and zoom for
+        the smallest change that satisfies the action, then read camera_status again.
+        Report the position before and after, and name the camera you moved.
 
     - name: snapshot
       description: Capture one frame from a camera now and post it here
@@ -97,16 +98,15 @@ chat:
           description: Camera id. Leave it out to choose from a list.
           optional: true
           choices:
-            tool: seedcam__cameras
-            items: cameras
+            tool: seedcam__camera_status
             value: id
             label: site
             # snapshot works on any camera, but the fleet is over Discord's cap of 25
             # options; a fixed camera is still reachable by typing its id.
             where: {type: ptz}
       prompt: >
-        Capture one frame from camera {camera} now. Call `cameras`, take the `id` of the
-        row {camera} names, and call `snapshot` once with it. Do not move the camera and do
+        Capture one frame from camera {camera} now. Call seedcam camera_status with no
+        arguments, take the id {camera} names, and call `snapshot` once with it. Do not move the camera and do
         not call it twice. Name the camera and its site and say the frame was captured; the
         image is posted beside your answer, so never describe it or repeat its path.
 
@@ -122,8 +122,8 @@ ai:
   model: gpt-oss-120b
   timeout: 120
 
-  # Room for a sweep: a camera with 9 presets costs `cameras`, `ptz_presets` and a
-  # goto/snapshot pair per preset, each pair its own turn because the move must land
+  # Room for a sweep: a camera with 9 presets costs `camera_status` and a move/snapshot
+  # pair per preset, each pair its own turn because the move must land
   # before the frame is pulled. 6 turns cut that off after one frame.
   max_turns: 24
   max_tool_calls: 24
